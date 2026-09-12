@@ -1,5 +1,5 @@
 """隔离配置下检查最小窗口、应用缩放、长列表和拖动自动滚动。"""
-import os, sys, site, json, subprocess, time
+import os, sys, site, json, subprocess, time, shutil, ctypes
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 deps=root/'validation/python_deps'
@@ -17,9 +17,9 @@ for scale in [1,1.5]:
     rules=json.loads((root/'assets/default-rules.json').read_text(encoding='utf-8'));base=rules['rules'][0]
     long_name='连接超时：验证很长的规则名称能够正常省略而不挤压操作按钮 '+('网络服务 ' * 12)
     rules['rules']=[dict(base,id='layout-'+str(i),name=long_name if i==0 else '规则 '+str(i),group='网络连接' if i<30 else '磁盘与存储',terms=['timeout','connection timed out','resolve failed'],target='keywords') for i in range(60)]
-    config=profile/'TraceFox/rules.json';config.write_text(json.dumps(rules,ensure_ascii=False),encoding='utf-8');initial=config.read_bytes()
+    exe=profile/'bin/TraceFox.exe';exe.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(root/'target/debug/TraceFox.exe',exe);config=exe.parent/'assets/default-rules.json';config.parent.mkdir(exist_ok=True);config.write_text(json.dumps(rules,ensure_ascii=False),encoding='utf-8');initial=config.read_bytes()
     env=os.environ.copy();env['LOCALAPPDATA']=str(profile);env['SLINT_SCALE_FACTOR']=str(scale)
-    proc=subprocess.Popen([str(root/'target/debug/TraceFox.exe')],env=env)
+    proc=subprocess.Popen([str(exe)],env=env)
     try:
         time.sleep(2);app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);click(app,'关键词与报告规则')
         e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid);e.wait('visible',timeout=10)

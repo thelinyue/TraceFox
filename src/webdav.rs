@@ -130,10 +130,13 @@ impl WebDavClient {
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
         let bytes = r.bytes().context("读取远端规则失败")?;
-        let rules = serde_json::from_slice(&bytes).context("远端规则 JSON 格式无效")?;
+        let rules =
+            RuleSet::import(std::str::from_utf8(&bytes).context("远端规则必须为 UTF-8 文本")?)
+                .context("远端规则 JSON 格式无效")?;
         Ok((rules, etag))
     }
     pub fn upload(&self, rules: &RuleSet) -> Result<Option<String>> {
+        rules.validate()?;
         let bytes = serde_json::to_vec_pretty(rules).context("序列化规则失败")?;
         let r = self
             .req(

@@ -49,6 +49,11 @@ pub struct Report {
     pub package: String,
     pub generated: String,
     pub layout: crate::rules::Layout,
+    pub log_files: Vec<crate::rules::LogFile>,
+    /// 实际解压路径与目录中文名的展示映射，不替换证据中的路径。
+    pub source_labels: HashMap<String, String>,
+    pub source_catalog: HashMap<String, Vec<String>>,
+    pub system_file_ids: HashMap<String, String>,
     pub system: Vec<Table>,
     pub findings: Vec<Finding>,
     pub events: Vec<Event>,
@@ -151,29 +156,73 @@ fn safe_target(root: &Path, rel: &Path) -> Result<PathBuf> {
     }
     Ok(p)
 }
-pub fn validate_archive(path: &Path, cancel: &AtomicBool) -> Result<()> {
+/// 统一归档读取入口：调用方显式传入容器类型，格式读取器只产出相对路径和字节流。
+/// 新增 ZIP 时只扩展此处分派；日志目录和规则引用不依赖 TAR 数据结构。
+fn visit_archive(
+    path: &Path,
+    container: &str,
+    cancel: &AtomicBool,
+    mut visit: impl FnMut(&Path, bool, &mut dyn Read) -> Result<()>,
+) -> Result<()> {
+    use std::io::{Seek, SeekFrom};
     check(cancel)?;
-    let mut ar = tar::Archive::new(MultiGzDecoder::new(BufReader::with_capacity(
+    let mut file = File::open(path)?;
+    let mut signature = [0u8; 4];
+    let n = file.read(&mut signature)?;
+    match container {
+        "zip" => bail!("暂不支持 ZIP 诊断包，请使用 TGZ 格式"),
+        "diagnostic_archive" => {}
+        other => bail!("归档容器不受支持：{other}"),
+    }
+    if n >= 2 && signature[..2] == *b"PK" {
+        bail!("归档容器标记为诊断包，但实际文件是 ZIP；请检查日志文件配置");
+    }
+    if n < 2 || signature[..2] != [0x1f, 0x8b] {
+        bail!("诊断包格式不受支持，请使用 TGZ 格式");
+    }
+    file.seek(SeekFrom::Start(0))?;
+    let mut archive = tar::Archive::new(MultiGzDecoder::new(BufReader::with_capacity(
         128 * 1024,
-        File::open(path)?,
+        file,
     )));
     let mut count = 0;
-    for e in ar.entries()? {
+    for entry in archive.entries()? {
         check(cancel)?;
-        let mut e = e?;
-        let ty = e.header().entry_type();
-        if !(ty.is_file() || ty.is_dir()) {
+        let mut entry = entry?;
+        let kind = entry.header().entry_type();
+        if !kind.is_file() && !kind.is_dir() {
             bail!("压缩包包含链接或不支持的条目类型");
         }
-        safe_target(Path::new("."), &e.path()?)?;
-        std::io::copy(&mut e, &mut std::io::sink())?;
+        let relative = entry.path()?.into_owned();
+        visit(&relative, kind.is_dir(), &mut entry)?;
         count += 1;
     }
-    std::io::copy(&mut ar.into_inner(), &mut std::io::sink())?;
+    // 必须读取至 gzip 结束，确保尾部 CRC 错误也能被检测。
+    let mut tail = archive.into_inner();
+    let mut buffer = [0u8; 8192];
+    loop {
+        check(cancel)?;
+        if tail.read(&mut buffer)? == 0 {
+            break;
+        }
+    }
     if count == 0 {
         bail!("诊断包为空");
     }
     Ok(())
+}
+pub fn validate_archive(path: &Path, cancel: &AtomicBool) -> Result<()> {
+    visit_archive(path, "diagnostic_archive", cancel, |relative, _, reader| {
+        safe_target(Path::new("."), relative)?;
+        let mut buffer = [0u8; 8192];
+        loop {
+            check(cancel)?;
+            if reader.read(&mut buffer)? == 0 {
+                break;
+            }
+        }
+        Ok(())
+    })
 }
 fn unpack(
     path: &Path,
@@ -193,23 +242,12 @@ fn unpack(
     let canonical_root = fs::canonicalize(root)?;
     let root = canonical_root.as_path();
     let mut files = vec![];
-    let mut ar = tar::Archive::new(MultiGzDecoder::new(BufReader::with_capacity(
-        128 * 1024,
-        File::open(path)?,
-    )));
     let mut buf = vec![0; 128 * 1024];
-    for e in ar.entries()? {
-        check(cancel)?;
-        let mut e = e?;
-        let rel = e.path()?.into_owned();
-        let dest = safe_target(root, &rel)?;
-        let ty = e.header().entry_type();
-        if ty.is_dir() {
+    visit_archive(path, "diagnostic_archive", cancel, |rel, directory, e| {
+        let dest = safe_target(root, rel)?;
+        if directory {
             fs::create_dir_all(&dest)?;
-            continue;
-        }
-        if !ty.is_file() {
-            bail!("拒绝解压链接或特殊文件：{}", rel.display());
+            return Ok(());
         }
         if let Some(p) = dest.parent() {
             fs::create_dir_all(p)?;
@@ -229,8 +267,8 @@ fn unpack(
         if files.len() % 100 == 0 {
             progress(format!("已解压 {} 个文件", files.len()));
         }
-    }
-    std::io::copy(&mut ar.into_inner(), &mut std::io::sink())?;
+        Ok(())
+    })?;
     if files.is_empty() {
         bail!("诊断包中没有文件");
     }
@@ -759,6 +797,9 @@ pub fn analyze_with_workers(
     // 通过进度回调报告各阶段累计耗时，帮助桌面端区分实际分析与等待时间。
     let started = std::time::Instant::now();
     rules.validate()?;
+    let mut resolved = rules.clone();
+    resolved.resolve_sources()?;
+    let rules = &resolved;
     let original = stamp(path)?;
     progress(format!(
         "归档校验完成（{:.2} 秒）",
@@ -780,6 +821,14 @@ pub fn analyze_with_workers(
             .into(),
         generated: chrono::Local::now().to_rfc3339(),
         layout: rules.layout.clone(),
+        log_files: rules.log_files.clone(),
+        source_labels: HashMap::new(),
+        source_catalog: HashMap::new(),
+        system_file_ids: rules
+            .system
+            .iter()
+            .map(|r| (r.id.clone(), r.source_file_id.clone()))
+            .collect(),
         system: vec![],
         findings: rules
             .rules
@@ -1075,6 +1124,31 @@ pub fn analyze_with_workers(
     if stamp(path)? != original {
         bail!("分析期间诊断包发生变化，请等待下载完成后重试");
     }
+    for (path, _) in &files {
+        let ids = rules
+            .log_files
+            .iter()
+            .filter(|file| file.source().is_ok_and(|source| source.matches(path)))
+            .map(|file| file.id.clone())
+            .collect::<Vec<_>>();
+        report.source_catalog.insert(path.clone(), ids);
+        let names = rules
+            .log_files
+            .iter()
+            .filter(|file| file.source().is_ok_and(|source| source.matches(path)))
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>();
+        if !names.is_empty() {
+            report.source_labels.insert(
+                path.clone(),
+                format!(
+                    "{} · {}",
+                    names.join("、"),
+                    path.rsplit('/').next().unwrap_or(path)
+                ),
+            );
+        }
+    }
     progress("正在生成离线 HTML…".into());
     let tmp = root.join("report.html.tmp");
     safe_target(&root, Path::new("report.html.tmp"))?;
@@ -1153,15 +1227,36 @@ pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
 }
 /// 规则编辑器使用同一份离线模板预览，确保预览与正式报告一致。
 pub fn preview(rules: &RuleSet, index: usize, system: bool, text: &str) -> Result<String> {
+    rules.validate()?;
+    let mut resolved = rules.clone();
+    resolved.resolve_sources()?;
+    let rules = &resolved;
     let mut report = Report {
         package: "规则预览".into(),
         generated: chrono::Local::now().to_rfc3339(),
         layout: rules.layout.clone(),
+        log_files: rules.log_files.clone(),
+        source_labels: HashMap::new(),
+        source_catalog: HashMap::new(),
+        system_file_ids: rules
+            .system
+            .iter()
+            .map(|r| (r.id.clone(), r.source_file_id.clone()))
+            .collect(),
         system: vec![],
         findings: vec![],
         events: vec![],
         warnings: vec![],
     };
+    let preview_ids = if system {
+        vec![rules.system[index].source_file_id.clone()]
+    } else {
+        rules.rules[index].source_file_ids.clone()
+    };
+    report
+        .source_labels
+        .insert("样例日志".into(), rules.source_label(&preview_ids));
+    report.source_catalog.insert("样例日志".into(), preview_ids);
     if system {
         let selected = &rules.system[index];
         report

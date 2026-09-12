@@ -1,8 +1,7 @@
+mod common;
+use common::engine;
 use std::{fs, io::Write, sync::atomic::AtomicBool};
-use tracefox::{
-    engine,
-    rules::{Rule, RuleSet, Source},
-};
+use tracefox::rules::{Rule, RuleSet, Source};
 fn package(path: &std::path::Path, entries: &[(&str, &str)]) {
     let f = fs::File::create(path).unwrap();
     let gz = flate2::write::GzEncoder::new(f, flate2::Compression::fast());
@@ -17,7 +16,8 @@ fn package(path: &std::path::Path, entries: &[(&str, &str)]) {
     t.into_inner().unwrap().finish().unwrap();
 }
 fn rules() -> RuleSet {
-    RuleSet {
+    common::catalog(&RuleSet {
+        log_files: vec![],
         version: 2,
         rules: vec![Rule {
             terms: vec!["error".into()],
@@ -31,7 +31,7 @@ fn rules() -> RuleSet {
         }],
         system: vec![],
         layout: Default::default(),
-    }
+    })
 }
 fn data(p: &std::path::Path) -> serde_json::Value {
     let s = fs::read_to_string(p).unwrap();

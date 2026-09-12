@@ -14,7 +14,7 @@ use std::{
 };
 use tracefox::{
     engine, extract, monitor,
-    rules::{Field, Rule, RuleSet, Source, SystemRule},
+    rules::{Field, LogFile, Rule, RuleSet, SystemRule},
     tasks::{self, Phase, Tasks},
 };
 slint::include_modules!();
@@ -932,8 +932,11 @@ fn accept_download(
     refresh(e, draft);
     e.set_dirty(false);
     save_sync_metadata(&tracefox::webdav::SyncMetadata {
-        local_hash: hash.clone(), remote_hash: hash, etag,
-    }).context("规则已保存，但同步记录保存失败")?;
+        local_hash: hash.clone(),
+        remote_hash: hash,
+        etag,
+    })
+    .context("规则已保存，但同步记录保存失败")?;
     e.set_feedback("规则已下载并保存".into());
     Ok(())
 }
@@ -1050,7 +1053,7 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
                     i,
                     r.name.clone(),
                     r.group.clone(),
-                    vec![r.source.pattern.clone()],
+                    vec![r.source_file_id.clone()],
                     r.enabled,
                     vec![],
                 )
@@ -1070,19 +1073,15 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
                     i,
                     r.name.clone(),
                     r.group.clone(),
-                    r.sources.iter().map(|s| s.pattern.clone()).collect(),
+                    r.source_file_ids.clone(),
                     r.enabled,
                     r.terms.clone(),
                 )
             })
             .collect()
     };
-    let mut files: Vec<String> = Vec::new();
-    let mut groups: Vec<SharedString> = Vec::new();
-    for (_, _, group, sources, _, _) in &entries {
-        if !groups.iter().any(|g| g.as_str() == group) {
-            groups.push(group.as_str().into());
-        }
+    let mut files: Vec<String> = d.rules.log_files.iter().map(|f| f.id.clone()).collect();
+    for (_, _, _, sources, _, _) in &entries {
         for source in sources {
             if !files.contains(source) {
                 files.push(source.clone());
@@ -1090,6 +1089,20 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
         }
     }
     let mut active = e.get_active_file().to_string();
+    let mut ordered_files = d
+        .rules
+        .layout
+        .file_order
+        .iter()
+        .filter(|f| files.contains(f))
+        .cloned()
+        .collect::<Vec<_>>();
+    let remaining = files
+        .into_iter()
+        .filter(|f| !ordered_files.contains(f))
+        .collect::<Vec<_>>();
+    ordered_files.extend(remaining);
+    let files = ordered_files;
     if !files.contains(&active) {
         active = files.first().cloned().unwrap_or_default();
     }
@@ -1110,15 +1123,31 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
     e.set_file_labels(ModelRc::new(VecModel::from(
         files
             .iter()
-            .map(|f| {
+            .map(|id| {
+                let label = d.rules.source_label(std::slice::from_ref(id));
                 SharedString::from(format!(
-                    "{}  ·  {}",
-                    f,
-                    entries.iter().filter(|r| r.3.contains(f)).count()
+                    "{} · {} 条规则",
+                    label,
+                    entries.iter().filter(|r| r.3.contains(id)).count()
                 ))
             })
             .collect::<Vec<_>>(),
     )));
+    e.set_file_titles(ModelRc::new(VecModel::from(
+        files
+            .iter()
+            .map(|id| {
+                let file = d.rules.log_file(id).expect("导航引用有效目录");
+                SharedString::from(format!(
+                    "{}\n{} · {} 条规则",
+                    file.name,
+                    file.file_name(),
+                    entries.iter().filter(|r| r.3.contains(id)).count()
+                ))
+            })
+            .collect::<Vec<_>>(),
+    )));
+    e.set_active_file_label(d.rules.source_label(std::slice::from_ref(&active)).into());
     d.indices.clear();
     let mut rows = Vec::new();
     let mut offset = 0.0;
@@ -1129,7 +1158,7 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
         if ![
             name.clone(),
             group.clone(),
-            sources.join(" "),
+            d.rules.source_label(&sources),
             terms.join(" "),
         ]
         .iter()
@@ -1153,14 +1182,13 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
         rows.push(RuleListRow {
             expanded,
             name: name.into(),
-            group: group.clone().into(),
             identity: id.into(),
             summary: if d.section == 1 {
                 format!("{} 个展示字段", d.rules.system[i].fields.len()).into()
             } else {
                 "".into()
             },
-            source: sources.join("；").into(),
+            source: d.rules.source_label(&sources).into(),
             enabled,
             offset,
             height,
@@ -1174,7 +1202,6 @@ fn refresh(e: &EditorWindow, d: &mut Draft) {
         offset += height;
         d.indices.push(i);
     }
-    e.set_group_choices(ModelRc::new(VecModel::from(groups)));
     e.set_content_height(offset);
     // 同一文件下原位更新，避免确认输入时销毁控件、丢失焦点。
     let current = e.get_rows();
@@ -1253,15 +1280,39 @@ fn reorder_file_rule(rules: &mut RuleSet, system: bool, id: &str, anchor: &str, 
 fn pos(s: &str, a: &[&str]) -> i32 {
     a.iter().position(|x| *x == s).unwrap_or(0) as i32
 }
+fn source_form_ids(e: &EditorWindow) -> Vec<String> {
+    e.get_source_options()
+        .iter()
+        .filter(|option| option.chosen)
+        .map(|option| option.id.to_string())
+        .collect()
+}
+fn load_source_form(e: &EditorWindow, rules: &RuleSet, ids: &[String]) {
+    let mut options = rules
+        .log_files
+        .iter()
+        .map(|file| LogFileChoice {
+            id: file.id.clone().into(),
+            label: file.label().into(),
+            chosen: ids.contains(&file.id),
+        })
+        .collect::<Vec<_>>();
+    // 打开表单时先显示已选来源，长目录中也能直接看见当前规则的配置。
+    options.sort_by_key(|option| {
+        ids.iter()
+            .position(|id| id == option.id.as_str())
+            .unwrap_or(usize::MAX)
+    });
+    e.set_source_options(ModelRc::new(VecModel::from(options)));
+    e.set_source(rules.source_label(ids).into());
+}
 fn load(e: &EditorWindow, d: &Draft) {
     if let Some(i) = d.selected {
         if d.section == 1 {
             let r = &d.rules.system[i];
             e.set_rule_name(r.name.clone().into());
-            e.set_group_name(r.group.clone().into());
             e.set_enabled_rule(r.enabled);
-            e.set_source(r.source.pattern.clone().into());
-            e.set_source_mode(pos(&r.source.mode, &["prefix", "path", "exact"]));
+            load_source_form(e, &d.rules, std::slice::from_ref(&r.source_file_id));
             e.set_extract_mode(pos(
                 &r.kind,
                 &["json", "kv", "sections", "columns", "regex"],
@@ -1282,22 +1333,8 @@ fn load(e: &EditorWindow, d: &Draft) {
         } else {
             let r = &d.rules.rules[i];
             e.set_rule_name(r.name.clone().into());
-            e.set_group_name(r.group.clone().into());
             e.set_enabled_rule(r.enabled);
-            e.set_source(
-                r.sources
-                    .iter()
-                    .map(|s| s.pattern.clone())
-                    .collect::<Vec<_>>()
-                    .join(";")
-                    .into(),
-            );
-            e.set_source_mode(
-                r.sources
-                    .first()
-                    .map(|s| pos(&s.mode, &["prefix", "path", "exact"]))
-                    .unwrap_or(0),
-            );
+            load_source_form(e, &d.rules, &r.source_file_ids);
             e.set_terms(r.terms.join("\n").into());
             e.set_term_tags(ModelRc::new(VecModel::from(
                 r.terms
@@ -1367,12 +1404,11 @@ fn apply(e: &EditorWindow, d: &mut Draft) -> Result<()> {
     if d.section == 1 {
         let r = &mut d.rules.system[i];
         r.name = e.get_rule_name().into();
-        r.group = e.get_group_name().into();
         r.enabled = e.get_enabled_rule();
-        r.source = Source {
-            pattern: e.get_source().into(),
-            mode: source_mode(e.get_source_mode()),
-        };
+        r.source_file_id = source_form_ids(e)
+            .first()
+            .cloned()
+            .context("请选择日志文件")?;
         r.kind =
             ["json", "kv", "sections", "columns", "regex"][e.get_extract_mode() as usize].into();
         r.selector = e.get_selector().into();
@@ -1386,28 +1422,8 @@ fn apply(e: &EditorWindow, d: &mut Draft) -> Result<()> {
     } else {
         let r = &mut d.rules.rules[i];
         r.name = e.get_rule_name().into();
-        r.group = e.get_group_name().into();
         r.enabled = e.get_enabled_rule();
-        let sources = e
-            .get_source()
-            .split(';')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|p| Source {
-                pattern: p.into(),
-                mode: source_mode(e.get_source_mode()),
-            })
-            .collect::<Vec<Source>>();
-        if r.sources
-            .iter()
-            .map(|s| s.pattern.as_str())
-            .ne(sources.iter().map(|s| s.pattern.as_str()))
-            || r.sources
-                .first()
-                .is_some_and(|s| s.mode != source_mode(e.get_source_mode()))
-        {
-            r.sources = sources;
-        }
+        r.source_file_ids = source_form_ids(e);
         r.terms = strings(&e.get_terms());
         r.exclude = strings(&e.get_excludes());
         r.note = e.get_note().into();
@@ -1430,6 +1446,7 @@ fn apply(e: &EditorWindow, d: &mut Draft) -> Result<()> {
         r.timezone = e.get_timezone().into();
         r.sort = ["source", "asc", "desc"][e.get_sort_mode() as usize].into();
     }
+    d.rules.resolve_sources()?;
     Ok(())
 }
 
@@ -1444,6 +1461,7 @@ fn load_layout(e: &EditorWindow, l: &tracefox::rules::Layout) {
     e.set_timeline_sort(i32::from(l.timeline_sort == "asc"));
     e.set_first_open(l.first_open);
     e.set_log_lines_per_batch(l.log_lines_per_batch as i32);
+    e.set_file_panel_width(l.file_panel_width.clamp(180, 360) as f32);
     e.set_section_order(if l.sections == ["timeline"] {
         3
     } else if l.sections == ["keywords"] {
@@ -1644,6 +1662,126 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
         expanded_rules: Default::default(),
         pending_terms: Default::default(),
     }));
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_choose_source(move |id, chosen| {
+            let e = w.unwrap();
+            let draft = d.borrow();
+            let mut ids = source_form_ids(&e);
+            if draft.section == 1 {
+                ids.clear();
+            }
+            ids.retain(|x| x != id.as_str());
+            if chosen {
+                ids.push(id.to_string());
+            }
+            // 勾选期间保持选项位置，避免重排后把下一次点击落到其他文件上。
+            let options = e
+                .get_source_options()
+                .iter()
+                .map(|mut option| {
+                    option.chosen = ids.iter().any(|id| id == option.id.as_str());
+                    option
+                })
+                .collect::<Vec<_>>();
+            e.set_source_options(ModelRc::new(VecModel::from(options)));
+            e.set_source(draft.rules.source_label(&ids).into());
+        });
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_open_file_form(move |new| {
+            let e = w.unwrap();
+            let mut draft = d.borrow_mut();
+            flush_inline(&e, &mut draft);
+            let file = if new {
+                None
+            } else {
+                draft.rules.log_file(e.get_active_file().as_str()).ok()
+            };
+            e.set_catalog_id(file.map(|f| f.id.clone()).unwrap_or_default().into());
+            e.set_catalog_name(file.map(|f| f.name.clone()).unwrap_or_default().into());
+            e.set_catalog_path(file.map(|f| f.path.clone()).unwrap_or_default().into());
+            e.set_catalog_mode(
+                file.map(|f| pos(&f.mode, &["prefix", "path", "exact"]))
+                    .unwrap_or(0),
+            );
+            e.set_catalog_container(file.map(|f| i32::from(f.container == "zip")).unwrap_or(0));
+            e.set_catalog_error("".into());
+            e.set_catalog_open(true);
+            e.set_dialog_open(true);
+            e.invoke_focus_file_form();
+        });
+    }
+    {
+        let w = e.as_weak();
+        e.on_close_file_form(move || {
+            let e = w.unwrap();
+            e.set_catalog_open(false);
+            e.set_dialog_open(false);
+            e.invoke_focus_list();
+        });
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_save_file_form(move || {
+            let e = w.unwrap();
+            let mut draft = d.borrow_mut();
+            let id = if e.get_catalog_id().is_empty() {
+                format!(
+                    "log-file-{}",
+                    chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+                )
+            } else {
+                e.get_catalog_id().to_string()
+            };
+            let file = LogFile {
+                id: id.clone(),
+                name: e.get_catalog_name().trim().into(),
+                path: e.get_catalog_path().trim().replace('\\', "/"),
+                mode: source_mode(e.get_catalog_mode()),
+                container: if e.get_catalog_container() == 0 {
+                    "diagnostic_archive"
+                } else {
+                    "zip"
+                }
+                .into(),
+            };
+            match draft.rules.save_log_file(file) {
+                Ok(()) => {
+                    e.set_active_file(id.into());
+                    e.set_dirty(true);
+                    e.set_catalog_open(false);
+                    e.set_dialog_open(false);
+                    refresh(&e, &mut draft);
+                    e.set_feedback("日志文件已加入草稿，保存全部后生效".into());
+                    e.invoke_focus_list();
+                }
+                Err(err) => e.set_catalog_error(err.to_string().into()),
+            }
+        });
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_delete_file(move || {
+            let e = w.unwrap();
+            let mut draft = d.borrow_mut();
+            flush_inline(&e, &mut draft);
+            match draft.rules.delete_log_file(e.get_active_file().as_str()) {
+                Ok(()) => {
+                    e.set_dirty(true);
+                    draft.selected = None;
+                    refresh(&e, &mut draft);
+                    e.set_feedback("日志文件已从草稿删除，保存全部后生效".into());
+                }
+                Err(err) => e.set_feedback(err.to_string().into()),
+            }
+        });
+    }
     e.set_webdav_configured(state.borrow().settings.webdav.is_some());
     {
         let w = e.as_weak();
@@ -1824,10 +1962,25 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
         e.on_webdav_download(move || {
             let e = w.unwrap();
             let result = (|| -> Result<()> {
-                let config = state.borrow().settings.webdav.clone().context("请先配置 WebDAV")?;
-                let password = tracefox::load_webdav_password(&format!("{}#{}", config.url, config.remote_path))?;
-                let (rules, etag) = tracefox::webdav::WebDavClient::new(&config, password)?.download()?;
-                accept_download(&e, &mut state.borrow_mut(), &mut d.borrow_mut(), rules, etag)
+                let config = state
+                    .borrow()
+                    .settings
+                    .webdav
+                    .clone()
+                    .context("请先配置 WebDAV")?;
+                let password = tracefox::load_webdav_password(&format!(
+                    "{}#{}",
+                    config.url, config.remote_path
+                ))?;
+                let (rules, etag) =
+                    tracefox::webdav::WebDavClient::new(&config, password)?.download()?;
+                accept_download(
+                    &e,
+                    &mut state.borrow_mut(),
+                    &mut d.borrow_mut(),
+                    rules,
+                    etag,
+                )
             })();
             if let Err(err) = result {
                 e.set_feedback(format!("下载失败：{err:#}").into());
@@ -1931,6 +2084,10 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
         let d = d.clone();
         e.on_cancel_dialog(move || {
             let e = w.unwrap();
+            if e.get_catalog_open() {
+                e.invoke_close_file_form();
+                return;
+            }
             if e.get_webdav_dialog_open() {
                 e.invoke_webdav_cancel();
                 return;
@@ -2277,22 +2434,14 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
             flush_inline(&e, &mut d);
             let mut edit = d.fork();
             let file = e.get_active_file().to_string();
-            let source = d
-                .rules
-                .system
-                .iter()
-                .map(|r| &r.source)
-                .chain(d.rules.rules.iter().flat_map(|r| r.sources.iter()))
-                .find(|s| s.pattern == file)
-                .cloned()
-                .unwrap_or(tracefox::rules::Source {
-                    pattern: file,
-                    mode: "prefix".into(),
-                });
+            if d.rules.log_file(&file).is_err() {
+                e.set_feedback("请先添加日志文件，再添加规则".into());
+                return;
+            }
             if edit.section == 1 {
                 let mut r = SystemRule::default();
                 r.name.clear();
-                r.source = source.clone();
+                r.source_file_id = file.clone();
                 edit.rules.system.push(r);
                 edit.selected = Some(edit.rules.system.len() - 1);
             } else {
@@ -2306,11 +2455,13 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                     ..Rule::default()
                 };
                 r.name.clear();
-                if !source.pattern.is_empty() {
-                    r.sources = vec![source];
-                }
+                r.source_file_ids = vec![file];
                 edit.rules.rules.push(r);
                 edit.selected = Some(edit.rules.rules.len() - 1);
+            }
+            if let Err(err) = edit.rules.resolve_sources() {
+                e.set_feedback(err.to_string().into());
+                return;
             }
             open_rule(&e, &mut d, edit, true);
         });
@@ -2404,8 +2555,8 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
             match result {
                 Ok(()) => {
                     state.borrow_mut().rules = d.rules.clone();
-                    let _ = e.hide();
-                    state.borrow_mut().editor = None;
+                    e.set_dirty(false);
+                    e.set_feedback("规则已保存，编辑窗口保持打开。".into());
                 }
                 Err(err) => e.set_feedback(format!("无法保存：{err:#}").into()),
             }
@@ -2642,6 +2793,17 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                     return;
                 }
             }
+            if selected {
+                let ids = out
+                    .rules
+                    .iter()
+                    .flat_map(|r| r.source_file_ids.iter())
+                    .chain(out.system.iter().map(|r| &r.source_file_id))
+                    .cloned()
+                    .collect::<std::collections::HashSet<_>>();
+                out.log_files.retain(|file| ids.contains(&file.id));
+                out.layout.file_order.retain(|id| ids.contains(id));
+            }
             if let Err(err) = out.validate() {
                 e.set_feedback(err.to_string().into());
                 return;
@@ -2661,6 +2823,81 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
         let mut draft = d.borrow_mut();
         draft.selected = None;
         refresh(&e, &mut draft);
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_drop_file(move |from, to| {
+            let e = w.unwrap();
+            let mut d = d.borrow_mut();
+            let visible = e.get_file_names();
+            let Some(source) = visible.row_data(from as usize).map(|s| s.to_string()) else {
+                return;
+            };
+            let Some(target) = visible.row_data(to as usize).map(|s| s.to_string()) else {
+                return;
+            };
+            let mut files = d.rules.layout.file_order.clone();
+            files.retain(|f| f != &source);
+            let at = files
+                .iter()
+                .position(|f| f == &target)
+                .unwrap_or(files.len());
+            files.insert(at, source.clone());
+            d.rules.layout.file_order = files;
+            // 日志文件排序同时调整关联规则的整体顺序，报告会按新的规则顺序展示命中结果。
+            let system = d.section == 1;
+            if system {
+                let moving = d
+                    .rules
+                    .system
+                    .iter()
+                    .filter(|r| r.source_file_id == source)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                d.rules.system.retain(|r| r.source_file_id != source);
+                let at = d
+                    .rules
+                    .system
+                    .iter()
+                    .position(|r| r.source_file_id == target)
+                    .unwrap_or(d.rules.system.len());
+                d.rules.system.splice(at..at, moving);
+            } else {
+                let moving = d
+                    .rules
+                    .rules
+                    .iter()
+                    .filter(|r| r.source_file_ids.contains(&source))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                d.rules
+                    .rules
+                    .retain(|r| !r.source_file_ids.contains(&source));
+                let at = d
+                    .rules
+                    .rules
+                    .iter()
+                    .position(|r| r.source_file_ids.contains(&target))
+                    .unwrap_or(d.rules.rules.len());
+                d.rules.rules.splice(at..at, moving);
+            }
+            e.set_dirty(true);
+            refresh(&e, &mut d);
+        });
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_file_panel_width_changed(move || {
+            let e = w.unwrap();
+            let width = e.get_file_panel_width().round().clamp(180.0, 360.0) as u32;
+            let mut draft = d.borrow_mut();
+            if draft.rules.layout.file_panel_width != width {
+                draft.rules.layout.file_panel_width = width;
+                e.set_dirty(true);
+            }
+        });
     }
     Ok(e)
 }
@@ -2682,7 +2919,6 @@ mod tests {
         assert!(save_rules_at(&path, &rules).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), original);
     }
-
     #[test]
     fn file_sort_keeps_report_groups_sources_and_hidden_rules() {
         let mut rules = RuleSet::defaults();

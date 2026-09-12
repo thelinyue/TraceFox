@@ -23,7 +23,7 @@ def fixture():
 
     def finding(id, count, fragments, target="keywords"):
         return dict(rule=dict(id=id, name=id, group="存储服务", note="匹配说明 <script>安全文本</script>",
-                              target=target, open=False), count=count, fragments=fragments,
+                              target=target, open=False, source_file_ids=sorted({"event" if target=="timeline" else "storage" if f["file"].endswith("storage.log") else "kern" for f in fragments}) or ["kern"]), count=count, fragments=fragments,
                     status="已提取" if count else "来源文件缺失")
 
     a = fragment("logs/kern.log", 1, 300, {20, 250})
@@ -42,7 +42,10 @@ def fixture():
                                       dict(name="Current", path="value", missing="")],
                  rows=[{"属性": "Reallocated_Sector_Ct", "Raw": "0", "Current": "100"},
                        {"属性": "media_errors", "Raw": "2", "Current": "99"}], storage=storage)
-    return dict(package="测试诊断包.tgz", generated="2026-09-11 12:00:00",
+    return dict(log_files=[dict(id=id,name=name,path=path,mode="exact",container="diagnostic_archive") for id,name,path in [("kern","内核日志","logs/kern.log"),("storage","存储日志","logs/storage.log"),("event","事件日志","logs/event.log"),("disk","设备信息","disk.json")]],
+                source_labels={"logs/kern.log":"内核日志 · kern.log","logs/storage.log":"存储日志 · storage.log"},
+                source_catalog={"logs/kern.log":["kern"],"logs/storage.log":["storage"],"logs/event.log":["event"]},
+                system_file_ids={"disks":"disk","smart":"disk"},package="测试诊断包.tgz", generated="2026-09-11 12:00:00",
                 layout=dict(title="诊断信息汇总", system_title="系统信息", keyword_title="关键词线索",
                             timeline_title="事件时间线", sections=["keywords", "timeline"], accent="#2468d8",
                             font_size=14, density="comfortable", first_open=True, log_lines_per_batch=50),
@@ -89,8 +92,13 @@ with sync_playwright() as p:
     load(report)
     assert page.locator("#keywords").is_visible()
     assert page.locator("#system").is_hidden()
-    assert page.locator("[data-rule]").count() == 1
+    assert page.locator("[data-rule]").count() == 2
     assert page.locator(".file-group").count() == 2
+    assert page.locator(".tree-group > summary").all_text_contents() == ["内核日志", "存储日志"]
+    assert "内核日志 · kern.log" in page.locator(".file-link").first.inner_text()
+    search("内核日志")
+    assert page.locator("#search-results button").count() > 0
+
     page.wait_for_function("document.querySelectorAll('#findings .line').length===50")
     search("TARGET")
     page.locator("#search-results button").first.click()
@@ -116,7 +124,7 @@ with sync_playwright() as p:
         assert ("Reallocated_Sector_Ct" if i == 0 else "media_errors") in row.locator(".disk-details").inner_text()
         row.locator(".disk-row-head").click()
         assert row.locator(".disk-details").is_hidden()
-    page.locator('[data-rule="0"]').click()
+    page.locator('[data-rule="0"]').first.click()
     page.evaluate("document.querySelector('#print-content').replaceChildren()")
     # 亮暗主题和移动目录、字体放大不能造成整页横向溢出。
     for theme in ["light", "dark"]:

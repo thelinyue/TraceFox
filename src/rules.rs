@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 fn yes() -> bool {
     true
@@ -29,6 +28,8 @@ fn default_view() -> String {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuleSet {
     pub version: u32,
+    /// 日志文件目录：名称与路径的唯一维护来源。
+    pub log_files: Vec<LogFile>,
     #[serde(default)]
     pub rules: Vec<Rule>,
     #[serde(default)]
@@ -36,6 +37,63 @@ pub struct RuleSet {
     #[serde(default)]
     pub layout: Layout,
 }
+
+/// 日志文件目录项，规则和报告通过此目录统一解析显示名称与来源。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LogFile {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    #[serde(default = "default_source_mode")]
+    pub mode: String,
+    /// 预留归档容器类型；当前仅支持 diagnostic_archive。
+    #[serde(default = "default_container")]
+    pub container: String,
+}
+
+impl LogFile {
+    /// 列表只显示中文名与文件名；完整路径只在配置表单中展示。
+    pub fn file_name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+    pub fn label(&self) -> String {
+        format!("{} · {}", self.name, self.file_name())
+    }
+
+    /// path 是归档内相对路径（也是匹配文本）；不再重复保存 entry_path。
+    /// ZIP 在入口统一拒绝，未来读取器接入时不需要改变规则的目录引用。
+    pub fn source(&self) -> Result<Source> {
+        match self.container.as_str() {
+            "diagnostic_archive" => {}
+            "zip" => bail!("日志文件「{}」暂不支持 ZIP 容器", self.name),
+            _ => bail!(
+                "日志文件「{}」的归档容器不受支持：{}",
+                self.name,
+                self.container
+            ),
+        }
+        let source = Source {
+            pattern: self.path.clone(),
+            mode: self.mode.clone(),
+        };
+        validate_source(&source)?;
+        if self.path.contains('\\')
+            || self.path.starts_with('/')
+            || self.path.contains(':')
+            || self.path.split('/').any(|p| p == "..")
+        {
+            bail!(
+                "日志文件路径须为归档内的相对路径，使用 / 分隔：{}",
+                self.path
+            );
+        }
+        Ok(source)
+    }
+}
+fn default_container() -> String {
+    "diagnostic_archive".into()
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Layout {
@@ -51,6 +109,10 @@ pub struct Layout {
     pub first_open: bool,
     /// 日志视图每批渲染的行数；仅影响报告浏览器的 DOM 数量，不截断报告数据。
     pub log_lines_per_batch: u32,
+    /// 规则编辑器中的日志文件导航顺序，不参与规则命中或报告排序。
+    pub file_order: Vec<String>,
+    /// 规则编辑器日志文件栏宽度。
+    pub file_panel_width: u32,
 }
 impl Default for Layout {
     fn default() -> Self {
@@ -66,10 +128,12 @@ impl Default for Layout {
             timeline_sort: "desc".into(),
             first_open: true,
             log_lines_per_batch: 200,
+            file_order: Vec::new(),
+            file_panel_width: 240,
         }
     }
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Source {
     pub pattern: String,
     #[serde(default = "default_source_mode")]
@@ -94,7 +158,7 @@ impl Source {
             }
             "path" => p.contains(&self.pattern),
             // 带目录的前缀限定相对路径，保留同目录轮转日志和服务子日志覆盖；
-            // 不带目录的旧配置继续按文件名匹配。
+            // 不带目录的配置按文件名匹配。
             _ if self.pattern.contains('/') => {
                 let (directory, prefix) = self.pattern.rsplit_once('/').unwrap();
                 let matches = |path: &str| {
@@ -117,6 +181,10 @@ pub struct Rule {
     pub group: String,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// 持久化只保存目录 ID；允许一条规则匹配多个已维护日志文件。
+    pub source_file_ids: Vec<String>,
+    /// 仅供分析使用的解析结果，不写入规则 JSON。每次分析和目录编辑后重新解析。
+    #[serde(skip)]
     pub sources: Vec<Source>,
     #[serde(default)]
     pub terms: Vec<String>,
@@ -163,6 +231,7 @@ impl Default for Rule {
             name: "新规则".into(),
             group: "自定义".into(),
             enabled: true,
+            source_file_ids: vec![],
             sources: vec![Source {
                 pattern: "syslog".into(),
                 mode: "prefix".into(),
@@ -212,6 +281,9 @@ pub struct SystemRule {
     pub group: String,
     #[serde(default = "yes")]
     pub enabled: bool,
+    pub source_file_id: String,
+    /// 从日志目录解析的运行时来源，不作为第二份配置保存。
+    #[serde(skip)]
     pub source: Source,
     pub kind: String,
     #[serde(default)]
@@ -241,6 +313,7 @@ impl Default for SystemRule {
             name: "新信息组".into(),
             group: "基本信息".into(),
             enabled: true,
+            source_file_id: String::new(),
             source: Source {
                 pattern: "sysinfo.json".into(),
                 mode: "prefix".into(),
@@ -455,7 +528,8 @@ impl RuleSet {
     /// 参考配置只按内置 ID 替换系统规则，自定义规则追加保留，不使用名称匹配。
     pub fn with_reference_system(&self) -> Result<Self> {
         let mut out = self.clone();
-        let defaults = Self::defaults();
+        let mut defaults = Self::defaults();
+        out.merge_catalog(&mut defaults, false);
         out.system = defaults.system.clone();
         out.system.extend(
             self.system
@@ -464,68 +538,205 @@ impl RuleSet {
                 .cloned(),
         );
         out.validate()?;
+        out.resolve_sources()?;
         Ok(out)
     }
 
-    /// 合并以标识优先，名称仅作为兼容回退；保留现有标识，避免关联字段因替换失效。
+    /// 新格式只按稳定标识合并规则；不同日志下的同名规则不能互相覆盖。
     pub fn merge(&self, incoming: &Self, replace: bool) -> Result<Self> {
         let mut out = self.clone();
+        let mut incoming = incoming.clone();
+        out.merge_catalog(&mut incoming, replace);
         for r in &incoming.rules {
-            let found = out.rules.iter().position(|x| x.id == r.id).or_else(|| {
-                out.rules
-                    .iter()
-                    .position(|x| x.name == r.name && x.group == r.group)
-            });
+            let found = out.rules.iter().position(|x| x.id == r.id);
             if let Some(i) = found {
                 if replace {
-                    let mut new = r.clone();
-                    new.id = out.rules[i].id.clone();
-                    out.rules[i] = new;
+                    out.rules[i] = r.clone();
                 }
             } else {
                 out.rules.push(r.clone());
             }
         }
-        let mut map = std::collections::HashMap::new();
-        for r in &incoming.system {
-            let existing = out.system.iter().find(|x| x.id == r.id).or_else(|| {
-                out.system
-                    .iter()
-                    .find(|x| x.name == r.name && x.group == r.group)
-            });
-            map.insert(
-                r.id.clone(),
-                existing
-                    .map(|x| x.id.clone())
-                    .unwrap_or_else(|| r.id.clone()),
-            );
-        }
-        for r in &incoming.system {
-            let mut new = r.clone();
-            new.id = map[&r.id].clone();
-            if let Some(id) = map.get(&r.join_rule) {
-                new.join_rule = id.clone();
-            }
-            if let Some(i) = out.system.iter().position(|x| x.id == new.id) {
+        for rule in &incoming.system {
+            if let Some(index) = out
+                .system
+                .iter()
+                .position(|existing| existing.id == rule.id)
+            {
                 if replace {
-                    out.system[i] = new;
+                    out.system[index] = rule.clone();
                 }
             } else {
-                out.system.push(new);
+                out.system.push(rule.clone());
             }
         }
         if replace {
             out.layout = incoming.layout.clone();
         }
         out.validate()?;
+        out.resolve_sources()?;
         Ok(out)
     }
+    /// 导入同时合并引用的目录；相同路径和匹配方式复用已有身份。
+    fn merge_catalog(&mut self, incoming: &mut Self, replace: bool) {
+        let mut mapping = std::collections::HashMap::new();
+        for file in &incoming.log_files {
+            if let Some(existing) = self.log_files.iter_mut().find(|x| {
+                x.id == file.id
+                    || (x.path == file.path && x.mode == file.mode && x.container == file.container)
+            }) {
+                mapping.insert(file.id.clone(), existing.id.clone());
+                if replace {
+                    let id = existing.id.clone();
+                    *existing = file.clone();
+                    existing.id = id;
+                }
+            } else {
+                self.log_files.push(file.clone());
+                mapping.insert(file.id.clone(), file.id.clone());
+            }
+        }
+        for rule in &mut incoming.rules {
+            for id in &mut rule.source_file_ids {
+                if let Some(mapped) = mapping.get(id) {
+                    *id = mapped.clone();
+                }
+            }
+        }
+        for rule in &mut incoming.system {
+            if let Some(mapped) = mapping.get(&rule.source_file_id) {
+                rule.source_file_id = mapped.clone();
+            }
+        }
+        incoming.layout.file_order = incoming
+            .layout
+            .file_order
+            .iter()
+            .filter_map(|id| mapping.get(id).cloned())
+            .collect();
+    }
     pub fn defaults() -> Self {
-        serde_json::from_str(include_str!("../assets/default-rules.json")).expect("内置规则无效")
+        let mut rules: Self = serde_json::from_str(include_str!("../assets/default-rules.json"))
+            .expect("内置规则无效");
+        rules.resolve_sources().expect("内置日志引用无效");
+        rules
+    }
+    pub fn log_file(&self, id: &str) -> Result<&LogFile> {
+        self.log_files
+            .iter()
+            .find(|file| file.id == id)
+            .with_context(|| format!("日志文件引用不存在：{id}"))
+    }
+    /// 展示名称只读取目录，改名不会改变规则身份、路径或报告关联键。
+    pub fn source_label(&self, ids: &[String]) -> String {
+        ids.iter()
+            .filter_map(|id| self.log_file(id).ok())
+            .map(LogFile::label)
+            .collect::<Vec<_>>()
+            .join("；")
+    }
+    /// 先完整解析后提交，缺失引用不会留下半更新的运行时来源。
+    pub fn resolve_sources(&mut self) -> Result<()> {
+        let keyword_sources = self
+            .rules
+            .iter()
+            .map(|rule| {
+                if rule.source_file_ids.is_empty() {
+                    bail!("规则「{}」：请选择已维护的日志文件", rule.name);
+                }
+                let mut seen = std::collections::HashSet::new();
+                rule.source_file_ids
+                    .iter()
+                    .map(|id| {
+                        if !seen.insert(id) {
+                            bail!("规则「{}」重复引用日志文件：{id}", rule.name);
+                        }
+                        self.log_file(id)?.source()
+                    })
+                    .collect::<Result<Vec<_>>>()
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let system_sources = self
+            .system
+            .iter()
+            .map(|r| self.log_file(&r.source_file_id)?.source())
+            .collect::<Result<Vec<_>>>()?;
+        for (rule, sources) in self.rules.iter_mut().zip(keyword_sources) {
+            rule.sources = sources;
+        }
+        for (rule, source) in self.system.iter_mut().zip(system_sources) {
+            rule.source = source;
+        }
+        Ok(())
+    }
+    /// 目录编辑只提交有效候选项；调用方负责在整个编辑窗口保存时落盘。
+    pub fn save_log_file(&mut self, file: LogFile) -> Result<()> {
+        let mut next = self.clone();
+        if let Some(existing) = next.log_files.iter_mut().find(|f| f.id == file.id) {
+            *existing = file;
+        } else {
+            next.log_files.push(file);
+        }
+        next.validate_catalog()?;
+        next.resolve_sources()?;
+        *self = next;
+        Ok(())
+    }
+    pub fn delete_log_file(&mut self, id: &str) -> Result<()> {
+        self.log_file(id)?;
+        let references = self
+            .rules
+            .iter()
+            .filter(|r| r.source_file_ids.iter().any(|x| x == id))
+            .map(|r| r.name.as_str())
+            .chain(
+                self.system
+                    .iter()
+                    .filter(|r| r.source_file_id == id)
+                    .map(|r| r.name.as_str()),
+            )
+            .collect::<Vec<_>>();
+        if !references.is_empty() {
+            bail!(
+                "日志文件仍被以下规则引用，请先调整或删除规则：{}",
+                references.join("、")
+            );
+        }
+        self.log_files.retain(|f| f.id != id);
+        self.layout.file_order.retain(|x| x != id);
+        Ok(())
+    }
+    pub fn validate_catalog(&self) -> Result<()> {
+        let mut ids = std::collections::HashSet::new();
+        let mut names = std::collections::HashSet::new();
+        let mut paths = std::collections::HashSet::new();
+        for file in &self.log_files {
+            if file.id.trim().is_empty() || !ids.insert(&file.id) {
+                bail!("日志文件标识重复或为空：{}", file.name);
+            }
+            if file.name.trim().is_empty() || !names.insert(&file.name) {
+                bail!("日志文件名称重复或为空：{}", file.name);
+            }
+            file.source()?;
+            // 同一归档容器内的路径是唯一来源；匹配方式属于目录项属性，不能制造重复路径。
+            if !paths.insert((&file.container, &file.path)) {
+                bail!("日志文件路径重复：{}", file.path);
+            }
+        }
+        if !(180..=360).contains(&self.layout.file_panel_width) {
+            bail!("日志文件栏宽度须为 180～360");
+        }
+        Ok(())
     }
     pub fn validate(&self) -> Result<Vec<String>> {
-        if self.version != 2 {
-            bail!("不支持的规则格式版本：{}", self.version);
+        self.validate_catalog()?;
+        let mut resolved = self.clone();
+        resolved.resolve_sources()?;
+        resolved.validate_resolved()
+    }
+    fn validate_resolved(&self) -> Result<Vec<String>> {
+        if self.version != 3 {
+            bail!("不支持的规则格式版本：{}，请使用新版规则文件", self.version);
         }
         let mut ids = std::collections::HashSet::new();
         let mut warnings = vec![];
@@ -655,53 +866,11 @@ impl RuleSet {
         Ok(warnings)
     }
     pub fn import(text: &str) -> Result<Self> {
-        let v: Value = serde_json::from_str(text).context("文件不是有效的 JSON")?;
-        if v.get("version").is_some() {
-            let r: Self = serde_json::from_value(v)?;
-            r.validate()?;
-            return Ok(r);
-        }
-        let files = v["files"]
-            .as_array()
-            .context("缺少 files 或 version 字段")?;
-        let mut out = Self {
-            version: 2,
-            rules: vec![],
-            system: vec![],
-            layout: Layout::default(),
-        };
-        for (fi, f) in files.iter().enumerate() {
-            let name = f["name"].as_str().context("文件范围缺少 name")?;
-            for (ki, k) in f["keywords"]
-                .as_array()
-                .context("缺少 keywords")?
-                .iter()
-                .enumerate()
-            {
-                let n = k["context_lines"].as_u64().unwrap_or(0) as usize;
-                let up = k["context_direction"] == "up";
-                out.rules.push(Rule {
-                    id: format!("legacy-{fi}-{ki}"),
-                    name: k["result"].as_str().unwrap_or("日志线索").into(),
-                    group: f["category"].as_str().unwrap_or(name).into(),
-                    sources: vec![Source {
-                        pattern: name.into(),
-                        mode: if name.contains('/') { "path" } else { "prefix" }.into(),
-                    }],
-                    terms: vec![k["term"].as_str().context("关键词缺少 term")?.into()],
-                    regex: k["regex"].as_bool().unwrap_or(false),
-                    note: k["result"].as_str().unwrap_or("").into(),
-                    before: if up { n } else { 0 },
-                    after: if up { 0 } else { n },
-                    reverse: k["search_direction"] == "up",
-                    fmt: k["fmt"].as_str().unwrap_or("").into(),
-                    legacy_group: fi.to_string(),
-                    ..Rule::default()
-                });
-            }
-        }
-        out.validate()?;
-        Ok(out)
+        let mut rules: Self = serde_json::from_str(text)
+            .context("规则 JSON 无效，请使用包含日志文件目录的新版规则")?;
+        rules.validate()?;
+        rules.resolve_sources()?;
+        Ok(rules)
     }
 }
 fn validate_source(s: &Source) -> Result<()> {
@@ -727,11 +896,5 @@ mod tests {
         assert!(m.matches("ata reset"));
         assert!(!m.matches("ata reset success"));
         assert!(!m.matches("ata"));
-    }
-    #[test]
-    fn legacy_context() {
-        let r=RuleSet::import(r#"{"files":[{"name":"kern","keywords":[{"term":"abc","context_lines":2,"context_direction":"up"}]}]}"#).unwrap();
-        assert_eq!(r.rules[0].before, 2);
-        assert_eq!(r.rules[0].after, 0);
     }
 }
