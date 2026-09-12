@@ -1,0 +1,2882 @@
+{
+  "version": 2,
+  "rules": [
+    {
+      "id": "legacy-0-0",
+      "name": "块设备信息",
+      "group": "lsblk",
+      "sources": [
+        {
+          "pattern": "cmd/lsblk.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "NAME"
+      ],
+      "regex": false,
+      "note": "块设备信息",
+      "before": 0,
+      "after": 500,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "0"
+    },
+    {
+      "id": "legacy-1-0",
+      "name": "万兆网卡崩溃",
+      "group": "内核崩溃日志",
+      "sources": [
+        {
+          "pattern": "dmesg.txt",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "aq_ring_rx_clean.*atlantic"
+      ],
+      "regex": true,
+      "note": "万兆网卡崩溃",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "1"
+    },
+    {
+      "id": "legacy-1-1",
+      "name": "error_code: 0x0通常与页故障（Page Fault）相关,建议检查内存条",
+      "group": "内核崩溃日志",
+      "sources": [
+        {
+          "pattern": "dmesg.txt",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "double fault, error_code: 0x0"
+      ],
+      "regex": false,
+      "note": "error_code: 0x0通常与页故障（Page Fault）相关,建议检查内存条",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "1"
+    },
+    {
+      "id": "legacy-1-2",
+      "name": "空指针引用，内存或者程序bug",
+      "group": "内核崩溃日志",
+      "sources": [
+        {
+          "pattern": "dmesg.txt",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BUG: kernel NULL pointer dereference"
+      ],
+      "regex": false,
+      "note": "空指针引用，内存或者程序bug",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "1"
+    },
+    {
+      "id": "legacy-1-3",
+      "name": "内核崩溃！",
+      "group": "内核崩溃日志",
+      "sources": [
+        {
+          "pattern": "dmesg.txt",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Oops: general protection fault"
+      ],
+      "regex": false,
+      "note": "内核崩溃！",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "1"
+    },
+    {
+      "id": "legacy-1-4",
+      "name": "未映射的物理内存地址或无效的虚拟地址(检查内存条)",
+      "group": "内核崩溃日志",
+      "sources": [
+        {
+          "pattern": "dmesg.txt",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "unable to handle page fault for address"
+      ],
+      "regex": false,
+      "note": "未映射的物理内存地址或无效的虚拟地址(检查内存条)",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "1"
+    },
+    {
+      "id": "legacy-1-5",
+      "name": "内核或驱动访问未映射/受保护的内存区域,指针计算错误（检查内存条）",
+      "group": "内核崩溃日志",
+      "sources": [
+        {
+          "pattern": "dmesg.txt",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "general protection fault.*probably for non-canonical address"
+      ],
+      "regex": false,
+      "note": "内核或驱动访问未映射/受保护的内存区域,指针计算错误（检查内存条）",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "1"
+    },
+    {
+      "id": "legacy-2-0",
+      "name": "nvmeI/O错误",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*I/O Error"
+      ],
+      "regex": true,
+      "note": "nvmeI/O错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-1",
+      "name": "nvme控制器I/O超时",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*I/O.*timeout.*reset controller"
+      ],
+      "regex": true,
+      "note": "nvme控制器I/O超时",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-2",
+      "name": "nvme尝试重置控制器，检测到设备未就绪，重置操作终止",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*Device not ready; aborting reset"
+      ],
+      "regex": true,
+      "note": "nvme尝试重置控制器，检测到设备未就绪，重置操作终止",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-3",
+      "name": "nvme控制器重置（硬件或驱动异常）",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*frozen state error detected, reset controller"
+      ],
+      "regex": true,
+      "note": "nvme控制器重置（硬件或驱动异常）",
+      "before": 0,
+      "after": 8,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-4",
+      "name": "系统无法与硬盘通讯，驱动正常",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "failed: Result: hostbyte=DID_BAD_TARGET driverbyte=DRIVER_OK"
+      ],
+      "regex": false,
+      "note": "系统无法与硬盘通讯，驱动正常",
+      "before": 2,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-5",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ata.*hard resetting link"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-6",
+      "name": "硬盘获取信息失败，硬盘或SATA异常",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ata.*failed.*INIT_DEV_PARAMS"
+      ],
+      "regex": true,
+      "note": "硬盘获取信息失败，硬盘或SATA异常",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-7",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ata.*hard resetting link"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-8",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "sd.*FAILED Result: hostbyte=DID_OK driverbyte=DRIVER_OK"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 3,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-9",
+      "name": "空指针引用，内存或者程序bug",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BUG: kernel NULL pointer dereference"
+      ],
+      "regex": false,
+      "note": "空指针引用，内存或者程序bug",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-10",
+      "name": "内存管理错误（检查内存）",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BUG: Bad page map"
+      ],
+      "regex": false,
+      "note": "内存管理错误（检查内存）",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-11",
+      "name": "程序指针异常，程序异常退出（内存、程序异常）",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "segfault at.*sp.*error"
+      ],
+      "regex": true,
+      "note": "程序指针异常，程序异常退出（内存、程序异常）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-12",
+      "name": "程序指针异常，程序异常退出（内存、程序异常）",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "general protection fault.*ip.*sp"
+      ],
+      "regex": true,
+      "note": "程序指针异常，程序异常退出（内存、程序异常）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-13",
+      "name": "ext4文件系统错误",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "EXT4-fs.*error"
+      ],
+      "regex": true,
+      "note": "ext4文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-14",
+      "name": "BTRFS文件系统错误",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BTRFS error"
+      ],
+      "regex": false,
+      "note": "BTRFS文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-15",
+      "name": "i915 GPU异常",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "i915.*timed out"
+      ],
+      "regex": true,
+      "note": "i915 GPU异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-16",
+      "name": "i915 GPU异常",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "i915.*GPU HANG"
+      ],
+      "regex": true,
+      "note": "i915 GPU异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-17",
+      "name": "雷电连接已断开（查看断开间隔、频率判断问题）",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "thunderbolt.*retimer disconnected"
+      ],
+      "regex": true,
+      "note": "雷电连接已断开（查看断开间隔、频率判断问题）",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-18",
+      "name": "USB接口识别异常",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "usb usb.*-port.*config error"
+      ],
+      "regex": true,
+      "note": "USB接口识别异常",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-19",
+      "name": "RK系列内存DMC boost_rate",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "rockchip-dmc dmc: boost_rate"
+      ],
+      "regex": false,
+      "note": "RK系列内存DMC boost_rate",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-2-20",
+      "name": "RK系列内存DMC performance_rate",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "rockchip-dmc dmc: performance_rate"
+      ],
+      "regex": false,
+      "note": "RK系列内存DMC performance_rate",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "2"
+    },
+    {
+      "id": "legacy-3-0",
+      "name": "内存信息",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "dmidecode 3.4"
+      ],
+      "regex": false,
+      "note": "内存信息",
+      "before": 0,
+      "after": 81,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-1",
+      "name": "可能是虚拟机搭建的绿联云，虚拟设备！！！",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Manufacturer: QEMU"
+      ],
+      "regex": false,
+      "note": "可能是虚拟机搭建的绿联云，虚拟设备！！！",
+      "before": 0,
+      "after": 15,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-2",
+      "name": "ext4文件系统错误",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "EXT4-fs.*error"
+      ],
+      "regex": true,
+      "note": "ext4文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-3",
+      "name": "文件系统只读，读写文件失败",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Read-only file system"
+      ],
+      "regex": false,
+      "note": "文件系统只读，读写文件失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-4",
+      "name": "UGACL权限应用失败",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "filemgr_serv.*ug_acl_del_ace malloc fail"
+      ],
+      "regex": true,
+      "note": "UGACL权限应用失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-5",
+      "name": "nvmeI/O错误",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*I/O Error"
+      ],
+      "regex": true,
+      "note": "nvmeI/O错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-6",
+      "name": "nvme控制器I/O超时",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*I/O.*timeout.*reset controller"
+      ],
+      "regex": true,
+      "note": "nvme控制器I/O超时",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-7",
+      "name": "nvme尝试重置控制器，检测到设备未就绪，重置操作终止",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "nvme.*Device not ready; aborting reset"
+      ],
+      "regex": true,
+      "note": "nvme尝试重置控制器，检测到设备未就绪，重置操作终止",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-8",
+      "name": "硬盘可靠性降低，建议备份数据（写入寿命警告）",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "smartd.*Critical Warning \\(0x04\\): Reliability"
+      ],
+      "regex": true,
+      "note": "硬盘可靠性降低，建议备份数据（写入寿命警告）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-9",
+      "name": "硬盘I/O错误，扇区异常",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "I/O error.*sector"
+      ],
+      "regex": true,
+      "note": "硬盘I/O错误，扇区异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-10",
+      "name": "硬盘获取信息失败，硬盘或SATA异常",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ata.*failed.*INIT_DEV_PARAMS"
+      ],
+      "regex": true,
+      "note": "硬盘获取信息失败，硬盘或SATA异常",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-11",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ata.*hard resetting link"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-12",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "sd.*FAILED Result: hostbyte=DID_OK driverbyte=DRIVER_OK"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 3,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-13",
+      "name": "空指针引用，内存或者程序bug",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BUG: kernel NULL pointer dereference"
+      ],
+      "regex": false,
+      "note": "空指针引用，内存或者程序bug",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-14",
+      "name": "内存管理错误（检查内存）",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BUG: Bad page map"
+      ],
+      "regex": false,
+      "note": "内存管理错误（检查内存）",
+      "before": 0,
+      "after": 20,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-15",
+      "name": "程序指针异常，程序异常退出（内存、程序异常）",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "segfault at.*sp.*error"
+      ],
+      "regex": true,
+      "note": "程序指针异常，程序异常退出（内存、程序异常）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-16",
+      "name": "程序指针异常，程序异常退出（内存、程序异常）",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "general protection fault.*ip.*sp"
+      ],
+      "regex": true,
+      "note": "程序指针异常，程序异常退出（内存、程序异常）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-17",
+      "name": "ext4文件系统错误",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "EXT4-fs.*error"
+      ],
+      "regex": true,
+      "note": "ext4文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-18",
+      "name": "BTRFS文件系统错误",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "BTRFS error"
+      ],
+      "regex": false,
+      "note": "BTRFS文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-19",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "postgres.*No space left on device"
+      ],
+      "regex": true,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-20",
+      "name": "i915 GPU异常",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "i915.*timed out"
+      ],
+      "regex": true,
+      "note": "i915 GPU异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-21",
+      "name": "i915 GPU异常",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "i915.*GPU HANG"
+      ],
+      "regex": true,
+      "note": "i915 GPU异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-22",
+      "name": "程序内存占用过高，触发oom",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "earlyoom.*sending SIGKILL"
+      ],
+      "regex": true,
+      "note": "程序内存占用过高，触发oom",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-3-23",
+      "name": "虚拟机实例内存占用过高，触发oom",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "earlyoom.*sending SIGKILL.*qemu-system-x86"
+      ],
+      "regex": true,
+      "note": "虚拟机实例内存占用过高，触发oom",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "3"
+    },
+    {
+      "id": "legacy-4-0",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "Failed to open system journal.*No space left on device"
+      ],
+      "regex": true,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-1",
+      "name": "文件系统只读，读写文件失败",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "Read-only file system"
+      ],
+      "regex": false,
+      "note": "文件系统只读，读写文件失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-2",
+      "name": "UGACL权限应用失败",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "filemgr_serv.*ug_acl_del_ace malloc fail"
+      ],
+      "regex": true,
+      "note": "UGACL权限应用失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-3",
+      "name": "nvmeI/O错误",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "nvme.*I/O Error"
+      ],
+      "regex": true,
+      "note": "nvmeI/O错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-4",
+      "name": "nvme控制器I/O超时",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "nvme.*I/O.*timeout.*reset controller"
+      ],
+      "regex": true,
+      "note": "nvme控制器I/O超时",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-5",
+      "name": "nvme尝试重置控制器，检测到设备未就绪，重置操作终止",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "nvme.*Device not ready; aborting reset"
+      ],
+      "regex": true,
+      "note": "nvme尝试重置控制器，检测到设备未就绪，重置操作终止",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-6",
+      "name": "硬盘可靠性降低，建议备份数据（写入寿命警告）",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "smartd.*Critical Warning \\(0x04\\): Reliability"
+      ],
+      "regex": true,
+      "note": "硬盘可靠性降低，建议备份数据（写入寿命警告）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-7",
+      "name": "硬盘I/O错误，扇区异常",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "I/O error.*sector"
+      ],
+      "regex": true,
+      "note": "硬盘I/O错误，扇区异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-8",
+      "name": "硬盘获取信息失败，硬盘或SATA异常",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "ata.*failed.*INIT_DEV_PARAMS"
+      ],
+      "regex": true,
+      "note": "硬盘获取信息失败，硬盘或SATA异常",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-9",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "ata.*hard resetting link"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-10",
+      "name": "SATA接触不良或硬盘故障",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "sd.*FAILED Result: hostbyte=DID_OK driverbyte=DRIVER_OK"
+      ],
+      "regex": true,
+      "note": "SATA接触不良或硬盘故障",
+      "before": 0,
+      "after": 3,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-11",
+      "name": "程序指针异常，程序异常退出（内存、程序异常）",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "segfault at.*sp.*error"
+      ],
+      "regex": true,
+      "note": "程序指针异常，程序异常退出（内存、程序异常）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-12",
+      "name": "程序指针异常，程序异常退出（内存、程序异常）",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "general protection fault.*ip.*sp"
+      ],
+      "regex": true,
+      "note": "程序指针异常，程序异常退出（内存、程序异常）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-13",
+      "name": "ext4文件系统错误",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "EXT4-fs.*error"
+      ],
+      "regex": true,
+      "note": "ext4文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-14",
+      "name": "BTRFS文件系统错误",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "BTRFS error"
+      ],
+      "regex": false,
+      "note": "BTRFS文件系统错误",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-15",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "postgres.*No space left on device"
+      ],
+      "regex": true,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-16",
+      "name": "i915 GPU异常",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "i915.*timed out"
+      ],
+      "regex": true,
+      "note": "i915 GPU异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-4-17",
+      "name": "i915 GPU异常",
+      "group": "5天日志记录",
+      "sources": [
+        {
+          "pattern": "log/journal-5days.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "i915.*GPU HANG"
+      ],
+      "regex": true,
+      "note": "i915 GPU异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "4"
+    },
+    {
+      "id": "legacy-5-0",
+      "name": "卷容量信息（字节/MB）",
+      "group": "桌面服务",
+      "sources": [
+        {
+          "pattern": "appLog/entry_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "allVolumes.*?(\\d{10,})\\s+(\\d{10,})\\s+(\\d{10,})"
+      ],
+      "regex": true,
+      "note": "卷容量信息（字节/MB）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "volume_info",
+      "legacy_group": "5"
+    },
+    {
+      "id": "legacy-6-0",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "nginx_error",
+      "sources": [
+        {
+          "pattern": "nginx/error.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "No space left on device"
+      ],
+      "regex": false,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "6"
+    },
+    {
+      "id": "legacy-7-0",
+      "name": "网络连接超时，外网访问可能异常",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "cloudhttp/client.*ugnas.com.*dial tcp.*i/o timeout"
+      ],
+      "regex": true,
+      "note": "网络连接超时，外网访问可能异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-1",
+      "name": "网络不可达，请检查网络和DNS设置",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "cloudhttp/client.*dial tcp: lookup center.ugnas.com: Temporary failure in name resolution"
+      ],
+      "regex": true,
+      "note": "网络不可达，请检查网络和DNS设置",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-2",
+      "name": "网络不可达，请检查网络和DNS设置",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "cloudhttp/doh/whitelist.*connect: network is unreachable"
+      ],
+      "regex": true,
+      "note": "网络不可达，请检查网络和DNS设置",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-3",
+      "name": "网络不可达，请检查网络和DNS设置",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "cloudhttp/doh/alidns.*connect: network is unreachable"
+      ],
+      "regex": true,
+      "note": "网络不可达，请检查网络和DNS设置",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-4",
+      "name": "腾讯云API密钥ID不正确（不支持DNSPod Token）",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ddnsprovider/provider/tencent.*The SecretId is not found"
+      ],
+      "regex": true,
+      "note": "腾讯云API密钥ID不正确（不支持DNSPod Token）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-5",
+      "name": "UPS JSON配置文件错误，加载失败",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ups/ups\\.go.*unexpected end of JSON input"
+      ],
+      "regex": true,
+      "note": "UPS JSON配置文件错误，加载失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-6",
+      "name": "DDNS定时任务被清理,DDNS更新可能失败",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "entry\\.go.*检测到定时脏数据CronID.*CronSet"
+      ],
+      "regex": true,
+      "note": "DDNS定时任务被清理,DDNS更新可能失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-7",
+      "name": "ram认证失败，不支持该认证方式",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "aliyun.*Forbidden.RAM"
+      ],
+      "regex": true,
+      "note": "ram认证失败，不支持该认证方式",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-7-8",
+      "name": "网卡设备正在被使用，创建网桥失败",
+      "group": "控制面板",
+      "sources": [
+        {
+          "pattern": "appLog/ctl_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "networkserv/netmgr/bridge/private.*create bridge.*failed.*Device or resource busy"
+      ],
+      "regex": true,
+      "note": "网卡设备正在被使用，创建网桥失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "7"
+    },
+    {
+      "id": "legacy-8-0",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "缩略图服务",
+      "sources": [
+        {
+          "pattern": "appLog/thumb_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "thumbnail_serv.*no space left on device"
+      ],
+      "regex": true,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "8"
+    },
+    {
+      "id": "legacy-9-0",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "缩略图工具",
+      "sources": [
+        {
+          "pattern": "appLog/thumb_tool",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "thumb_tool.*No space left on device"
+      ],
+      "regex": true,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "9"
+    },
+    {
+      "id": "legacy-10-0",
+      "name": "网口未检测到有效信号，请检查DHCP服务或者NAS网口是否正常",
+      "group": "网卡接口状态",
+      "sources": [
+        {
+          "pattern": "ifconfig.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "NO-CARRIER.*state DOWN"
+      ],
+      "regex": true,
+      "note": "网口未检测到有效信号，请检查DHCP服务或者NAS网口是否正常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "10"
+    },
+    {
+      "id": "legacy-11-0",
+      "name": "未找到upk.json应用列表文件，应用可能推送失败",
+      "group": "应用中心",
+      "sources": [
+        {
+          "pattern": "appLog/app_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "/ugreen/.config/.appstore/@cache/upk.json: no such file or directory"
+      ],
+      "regex": false,
+      "note": "未找到upk.json应用列表文件，应用可能推送失败",
+      "before": 2,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "11"
+    },
+    {
+      "id": "legacy-11-1",
+      "name": "云端upk.json与本地不一致",
+      "group": "应用中心",
+      "sources": [
+        {
+          "pattern": "appLog/app_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "remote hash.*not match local hash"
+      ],
+      "regex": true,
+      "note": "云端upk.json与本地不一致",
+      "before": 0,
+      "after": 2,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "11"
+    },
+    {
+      "id": "legacy-11-2",
+      "name": "网络超时，应用中心下载应用可能异常",
+      "group": "应用中心",
+      "sources": [
+        {
+          "pattern": "appLog/app_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ugnas.com: i/o timeout"
+      ],
+      "regex": false,
+      "note": "网络超时，应用中心下载应用可能异常",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "11"
+    },
+    {
+      "id": "legacy-12-0",
+      "name": "iSCSI配置文件缺失，创建iSCSI失败",
+      "group": "SAN Manager",
+      "sources": [
+        {
+          "pattern": "appLog/iscsi_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Cannot set dbroot to /etc/target"
+      ],
+      "regex": false,
+      "note": "iSCSI配置文件缺失，创建iSCSI失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "12"
+    },
+    {
+      "id": "legacy-13-0",
+      "name": "dbus删除code非0，对该文件无权限删除",
+      "group": "影视中心",
+      "sources": [
+        {
+          "pattern": "appLog/video_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Failed to delete source file.*debus DeletePathsV2 code is not 0"
+      ],
+      "regex": true,
+      "note": "dbus删除code非0，对该文件无权限删除",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "13"
+    },
+    {
+      "id": "legacy-13-1",
+      "name": "等待服务器响应超时(检查网络环境)",
+      "group": "影视中心",
+      "sources": [
+        {
+          "pattern": "appLog/video_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Client.Timeout exceeded while awaiting headers"
+      ],
+      "regex": false,
+      "note": "等待服务器响应超时(检查网络环境)",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "13"
+    },
+    {
+      "id": "legacy-13-2",
+      "name": "影视中心应用所在存储空间容量不足",
+      "group": "影视中心",
+      "sources": [
+        {
+          "pattern": "appLog/video_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "No space left on device"
+      ],
+      "regex": false,
+      "note": "影视中心应用所在存储空间容量不足",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "13"
+    },
+    {
+      "id": "legacy-13-3",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "影视中心",
+      "sources": [
+        {
+          "pattern": "appLog/video_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "video_serv.*no space left on device"
+      ],
+      "regex": true,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "13"
+    },
+    {
+      "id": "legacy-14-0",
+      "name": "图片权属异常，图片可能在相册无缩略图（可以检查有拔盘，跨个人目录移动图片）",
+      "group": "相册",
+      "sources": [
+        {
+          "pattern": "appLog/photo_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "CheckPictureReadAccess picture.*not found or own by"
+      ],
+      "regex": true,
+      "note": "图片权属异常，图片可能在相册无缩略图（可以检查有拔盘，跨个人目录移动图片）",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "14"
+    },
+    {
+      "id": "legacy-14-1",
+      "name": "文件类型和后缀不匹配，修改拍摄时间失败",
+      "group": "相册",
+      "sources": [
+        {
+          "pattern": "appLog/photo_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        ".*Not a valid.*looks more like"
+      ],
+      "regex": true,
+      "note": "文件类型和后缀不匹配，修改拍摄时间失败",
+      "before": 2,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "14"
+    },
+    {
+      "id": "legacy-15-0",
+      "name": "用户执行了升级内核命令，建议恢复出厂设置恢复",
+      "group": "虚拟机",
+      "sources": [
+        {
+          "pattern": "appLog/kvm_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "GDBuS.Error:org.freedesktop.DBus.Error.TimedOut"
+      ],
+      "regex": false,
+      "note": "用户执行了升级内核命令，建议恢复出厂设置恢复",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "15"
+    },
+    {
+      "id": "legacy-15-1",
+      "name": "虚拟机数据库损坏",
+      "group": "虚拟机",
+      "sources": [
+        {
+          "pattern": "appLog/kvm_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "database disk image is malformed"
+      ],
+      "regex": false,
+      "note": "虚拟机数据库损坏",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "15"
+    },
+    {
+      "id": "legacy-16-0",
+      "name": "文件系统只读，读写文件失败",
+      "group": "在线文档",
+      "sources": [
+        {
+          "pattern": "appLog/office_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ERROR.*read-only file system"
+      ],
+      "regex": true,
+      "note": "文件系统只读，读写文件失败",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "16"
+    },
+    {
+      "id": "legacy-17-0",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "下载中心",
+      "sources": [
+        {
+          "pattern": "appLog/download_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "No space left on device"
+      ],
+      "regex": false,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "17"
+    },
+    {
+      "id": "legacy-18-0",
+      "name": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "group": "同步与备份服务",
+      "sources": [
+        {
+          "pattern": "appLog/sync.",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "no space left on device"
+      ],
+      "regex": false,
+      "note": "系统存储空间不足，程序可能运行异常，用户登录失败",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "18"
+    },
+    {
+      "id": "legacy-19-0",
+      "name": "115网盘目录限制，单层目录文件数量超过1w",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "115.*err:exceeded_the_limit_of_this_directory"
+      ],
+      "regex": true,
+      "note": "115网盘目录限制，单层目录文件数量超过1w",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-1",
+      "name": "115网盘token验证失败，可尝试退出重新登陆",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "115.*code: 40140126, msg: access_token"
+      ],
+      "regex": true,
+      "note": "115网盘token验证失败，可尝试退出重新登陆",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-2",
+      "name": "文件系统只读，读写文件失败",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "ERROR.*read-only file system"
+      ],
+      "regex": true,
+      "note": "文件系统只读，读写文件失败",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-3",
+      "name": "hosts文件可能异常，网络错误",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "lookup localhost.*no such host"
+      ],
+      "regex": true,
+      "note": "hosts文件可能异常，网络错误",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-4",
+      "name": "用户无权限访问资源（阿里云盘账号异常）",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "UserNotAllowedAccessResource"
+      ],
+      "regex": false,
+      "note": "用户无权限访问资源（阿里云盘账号异常）",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-5",
+      "name": "Google Drive通道当前拥堵，请稍后再试",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "googleapi: Error 403: Quota exceeded for quota metric"
+      ],
+      "regex": true,
+      "note": "Google Drive通道当前拥堵，请稍后再试",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-6",
+      "name": "Google Drive通道当前拥堵，请稍后再试",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "Google Drive channel is currently congested, please try again later"
+      ],
+      "regex": true,
+      "note": "Google Drive通道当前拥堵，请稍后再试",
+      "before": 0,
+      "after": 1,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-7",
+      "name": "网络不可达，请检查网络和DNS设置",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "connect: network is unreachable"
+      ],
+      "regex": false,
+      "note": "网络不可达，请检查网络和DNS设置",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-8",
+      "name": "网络不可达，请检查网络和DNS设置",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "read:connection reset by peer"
+      ],
+      "regex": false,
+      "note": "网络不可达，请检查网络和DNS设置",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-9",
+      "name": "百度网盘101003错误代码，无权限写入或存储空间已满",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "baidu/fs.*fail.*101003"
+      ],
+      "regex": true,
+      "note": "百度网盘101003错误代码，无权限写入或存储空间已满",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-10",
+      "name": "百度网盘100014错误代码，文件名称存在特殊字符",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "baidu_err_100014"
+      ],
+      "regex": true,
+      "note": "百度网盘100014错误代码，文件名称存在特殊字符",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-11",
+      "name": "百度网盘账号有异常，尝试电脑登录该网盘账号",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "get baidu pan user information failed"
+      ],
+      "regex": false,
+      "note": "百度网盘账号有异常，尝试电脑登录该网盘账号",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-12",
+      "name": "文件名 / 路径非法字符",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "err:invalid_file_name"
+      ],
+      "regex": false,
+      "note": "文件名 / 路径非法字符",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-19-13",
+      "name": "文件名 / 完整路径超长",
+      "group": "网盘工具",
+      "sources": [
+        {
+          "pattern": "appLog/cloud_serv",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "file_name_too_long"
+      ],
+      "regex": false,
+      "note": "文件名 / 完整路径超长",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "19"
+    },
+    {
+      "id": "legacy-20-0",
+      "name": "i/o超时,请检查网络或dns",
+      "group": "迅雷下载",
+      "sources": [
+        {
+          "pattern": "xunlei/etm.xlog",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "i/o timeout"
+      ],
+      "regex": false,
+      "note": "i/o超时,请检查网络或dns",
+      "before": 0,
+      "after": 0,
+      "reverse": true,
+      "fmt": "",
+      "legacy_group": "20"
+    },
+    {
+      "id": "btrfs-snapshot-delete",
+      "name": "Btrfs 快照定期删除",
+      "group": "内核服务",
+      "sources": [
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "btrfs_commit_transaction"
+      ],
+      "regex": false,
+      "note": "可能是 Btrfs 快照定期删除导致 NAS 系统无法访问",
+      "before": 3,
+      "after": 5,
+      "target": "both"
+    },
+    {
+      "id": "mcu-version",
+      "name": "MCU 版本检查",
+      "group": "系统日志",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        },
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "mcu_ver"
+      ],
+      "regex": false,
+      "note": "请检查日志中的 MCU 版本；如果 mcu_ver 不是 15，需要更新 MCU。",
+      "before": 0,
+      "after": 0
+    },
+    {
+      "id": "boot",
+      "name": "系统开机",
+      "group": "系统事件",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        },
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "(?:^|kernel:\\s*|kernel\\[\\d+\\]:\\s*)(?:\\[\\s*[\\d.]+\\]\\s*)?Linux version\\b"
+      ],
+      "regex": true,
+      "note": "日志记录内核启动信息。",
+      "target": "timeline",
+      "before": 3,
+      "after": 5
+    },
+    {
+      "id": "off",
+      "name": "系统关机",
+      "group": "系统事件",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "do poweroff proc info"
+      ],
+      "regex": false,
+      "note": "表示进入关机流程，不代表流程已完成。",
+      "target": "timeline",
+      "before": 3,
+      "after": 5
+    },
+    {
+      "id": "boot-nul-before-kernel",
+      "name": "开机前存在 NUL 字节",
+      "group": "系统事件",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        },
+        {
+          "pattern": "log/kern.log",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "\\[NUL × \\d+\\].*Linux version\\b"
+      ],
+      "regex": true,
+      "note": "Linux version 开机记录前出现不可见 NUL 字节，可能与断电或电源不稳定有关；仅凭此现象不能确定故障原因。",
+      "target": "timeline",
+      "before": 3,
+      "after": 5
+    },
+    {
+      "id": "reboot",
+      "name": "系统重启",
+      "group": "系统事件",
+      "sources": [
+        {
+          "pattern": "log/syslog",
+          "mode": "prefix"
+        }
+      ],
+      "terms": [
+        "do reboot proc info"
+      ],
+      "regex": false,
+      "note": "表示进入重启流程，不代表流程已完成。",
+      "target": "timeline",
+      "before": 3,
+      "after": 5
+    },
+    {
+      "id": "upgrade",
+      "name": "系统升级成功",
+      "group": "系统事件",
+      "sources": [
+        {
+          "pattern": "log/ugpt.log",
+          "mode": "exact"
+        }
+      ],
+      "terms": [
+        "Successful"
+      ],
+      "regex": false,
+      "note": "升级日志中的成功记录；未命中不表示失败。",
+      "target": "timeline",
+      "before": 3,
+      "after": 5
+    }
+  ],
+  "system": [
+    {
+      "id": "base",
+      "name": "设备概览",
+      "group": "设备概览",
+      "source": {
+        "pattern": "sysinfo.json",
+        "mode": "exact"
+      },
+      "kind": "json",
+      "fields": [
+        {
+          "name": "设备名称",
+          "path": "deviceName",
+          "format": ""
+        },
+        {
+          "name": "序列号",
+          "path": "sn",
+          "format": ""
+        },
+        {
+          "name": "系统版本",
+          "path": "systemVersion",
+          "format": ""
+        },
+        {
+          "name": "平台",
+          "path": "platform",
+          "format": ""
+        }
+      ],
+      "selector": "",
+      "view": "cards",
+      "missing": "未获取"
+    },
+    {
+      "id": "disks",
+      "name": "硬盘与存储池",
+      "group": "硬盘与存储池",
+      "source": {
+        "pattern": "sysinfo.json",
+        "mode": "exact"
+      },
+      "kind": "json",
+      "fields": [
+        {
+          "name": "盘位",
+          "path": "disk_info.slot",
+          "format": ""
+        },
+        {
+          "name": "型号",
+          "path": "disk_info.model",
+          "format": ""
+        },
+        {
+          "name": "序列号",
+          "path": "disk_info.serial",
+          "format": ""
+        },
+        {
+          "name": "品牌",
+          "path": "disk_info.brand",
+          "format": ""
+        },
+        {
+          "name": "接口",
+          "path": "disk_info.interface_type",
+          "format": ""
+        },
+        {
+          "name": "温度",
+          "path": "disk_info.temperature",
+          "format": "",
+          "unit": "℃"
+        },
+        {
+          "name": "通电时长",
+          "path": "disk_info.power_on_hours",
+          "format": "",
+          "unit": "小时"
+        },
+        {
+          "name": "容量",
+          "path": "disk_info.size",
+          "format": "bytes"
+        },
+        {
+          "name": "设备名称",
+          "path": "disk_info.name",
+          "format": ""
+        },
+        {
+          "name": "设备路径",
+          "path": "disk_info.dev_name",
+          "format": ""
+        },
+        {
+          "name": "启用状态",
+          "path": "disk_info.activate",
+          "format": ""
+        },
+        {
+          "name": "运行状态",
+          "path": "disk_info.status",
+          "format": ""
+        },
+        {
+          "name": "使用状态",
+          "path": "disk_info.usage",
+          "format": ""
+        },
+        {
+          "name": "SMART 支持",
+          "path": "disk_info.is_support_smart",
+          "format": ""
+        }
+      ],
+      "selector": "disk.devices[]",
+      "view": "storage",
+      "missing": "未获取"
+    },
+    {
+      "id": "smart",
+      "name": "SMART 属性",
+      "group": "硬盘与存储池",
+      "source": {
+        "pattern": "sysinfo.json",
+        "mode": "exact"
+      },
+      "kind": "json",
+      "fields": [
+        {
+          "name": "ID",
+          "path": "id",
+          "format": ""
+        },
+        {
+          "name": "名称",
+          "path": "name",
+          "format": ""
+        },
+        {
+          "name": "Current",
+          "path": "value",
+          "format": ""
+        },
+        {
+          "name": "Worst",
+          "path": "worst",
+          "format": ""
+        },
+        {
+          "name": "Threshold",
+          "path": "thresh",
+          "format": ""
+        },
+        {
+          "name": "Raw",
+          "path": "raw_string",
+          "format": ""
+        },
+        {
+          "name": "源状态",
+          "path": "status",
+          "format": ""
+        }
+      ],
+      "selector": "disk.devices[].smart_info.report[]",
+      "view": "storage-smart",
+      "missing": "未获取"
+    },
+    {
+      "id": "net",
+      "name": "网络接口",
+      "group": "网络接口",
+      "source": {
+        "pattern": "sysinfo.json",
+        "mode": "exact"
+      },
+      "kind": "json",
+      "fields": [
+        {
+          "name": "接口",
+          "path": "name",
+          "format": ""
+        },
+        {
+          "name": "运行状态",
+          "path": "is_running",
+          "format": ""
+        },
+        {
+          "name": "MAC",
+          "path": "mac",
+          "format": ""
+        },
+        {
+          "name": "IPv4",
+          "path": "ipv4",
+          "format": ""
+        },
+        {
+          "name": "IPv6",
+          "path": "ipv6",
+          "format": ""
+        },
+        {
+          "name": "MTU",
+          "path": "NetInterface.MTU",
+          "format": ""
+        }
+      ],
+      "selector": "network.interface[]",
+      "view": "table",
+      "missing": "未获取"
+    },
+    {
+      "id": "memory",
+      "name": "内存信息",
+      "group": "内存信息",
+      "source": {
+        "pattern": "cmd/dmidecode.log",
+        "mode": "exact"
+      },
+      "kind": "sections",
+      "fields": [
+        {
+          "name": "位置",
+          "path": "Locator",
+          "format": ""
+        },
+        {
+          "name": "容量",
+          "path": "Size",
+          "format": ""
+        },
+        {
+          "name": "品牌",
+          "path": "Manufacturer",
+          "format": ""
+        },
+        {
+          "name": "型号",
+          "path": "Part Number",
+          "format": ""
+        }
+      ],
+      "selector": "Memory Device",
+      "view": "table",
+      "missing": "未获取"
+    },
+    {
+      "id": "memory-total",
+      "name": "系统可用物理内存",
+      "group": "补充信息",
+      "source": {
+        "pattern": "sysinfo.json",
+        "mode": "exact"
+      },
+      "kind": "json",
+      "view": "cards",
+      "missing": "",
+      "fields": [
+        {
+          "name": "系统可用物理内存",
+          "path": "memInfo",
+          "capture": "MemTotal:\\s*(\\d+)",
+          "format": "kib"
+        }
+      ]
+    },
+    {
+      "id": "block",
+      "name": "块设备与挂载",
+      "group": "补充信息",
+      "source": {
+        "pattern": "cmd/lsblk.log",
+        "mode": "exact"
+      },
+      "kind": "columns",
+      "fields": [
+        {
+          "name": "设备树",
+          "path": "NAME",
+          "format": ""
+        },
+        {
+          "name": "容量",
+          "path": "SIZE",
+          "format": ""
+        },
+        {
+          "name": "类型",
+          "path": "TYPE",
+          "format": ""
+        },
+        {
+          "name": "只读",
+          "path": "RO",
+          "format": ""
+        },
+        {
+          "name": "挂载点",
+          "path": "MOUNTPOINTS",
+          "format": ""
+        }
+      ],
+      "selector": "",
+      "view": "table",
+      "missing": "未获取"
+    },
+    {
+      "id": "memory-array",
+      "name": "内存阵列",
+      "group": "补充信息",
+      "source": {
+        "pattern": "cmd/dmidecode.log",
+        "mode": "exact"
+      },
+      "kind": "sections",
+      "fields": [
+        {
+          "name": "最大容量",
+          "path": "Maximum Capacity",
+          "format": ""
+        },
+        {
+          "name": "插槽数量",
+          "path": "Number Of Devices",
+          "format": ""
+        }
+      ],
+      "selector": "Physical Memory Array",
+      "view": "cards",
+      "missing": "未获取"
+    }
+  ]
+}

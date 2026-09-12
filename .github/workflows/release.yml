@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check release version
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 --locked | ConvertFrom-Json).packages[0].version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw '标签与程序版本不一致' }
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Test
+        run: cargo test --locked
+      - name: Test report SMART handling
+        run: node scripts/test_storage_health.cjs
+      - name: Build
+        run: cargo build --release --locked
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:RELEASE_VERSION" installer/TraceFox.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish formal release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME "dist/TraceFox-$env:RELEASE_VERSION-setup.exe" --verify-tag --title "TraceFox $env:RELEASE_VERSION" --notes-file "docs/releases/$env:GITHUB_REF_NAME.md" --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
