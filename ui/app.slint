@@ -221,7 +221,46 @@ component TermInput inherits FocusScope {
         changed has-focus=>{if !self.has-focus && !root.cancelled && self.text!=root.value {root.commit(self.text);}}
     }
 }
-export struct LogFileChoice { id:string, label:string, chosen:bool }
+export struct LogFileChoice { id:string, label:string, chosen:bool, matching:bool }
+// 可搜索多选框把已选日志、输入入口和候选浮层封装为一个控件，浮层不参与表单布局。
+component SourcePicker inherits Rectangle {
+    in property <[LogFileChoice]> options;
+    in property <[LogFileChoice]> selected-options;
+    in-out property <string> query;
+    in-out property <bool> open;
+    callback choose(string, bool);
+    callback search();
+    callback remove-last();
+    height:40px;vertical-stretch:0;z:10;background:#fff;border-width:1px;border-color:query-input.has-focus ? #2468d8 : #dfe4eb;border-radius:4px;
+    forward-focus:query-input;
+    changed open=>{if root.open {source-menu.show();} else {source-menu.close();}}
+    HorizontalBox {padding:4px;spacing:6px;
+        for option in root.selected-options: Rectangle {width:min(260px,max(120px,selected-label.preferred-width + 20px));height:30px;background:#e8f0ff;border-radius:4px;horizontal-stretch:0;
+            HorizontalBox {padding-left:8px;padding-right:8px;spacing:4px;
+                selected-label := Text{text:option.label;color:#34445c;overflow:elide;vertical-alignment:center;horizontal-stretch:1;}
+            }
+        }
+        Rectangle {min-width:120px;horizontal-stretch:1;
+            Text {visible:root.query=="";text:"输入日志名称或路径进行筛选";color:#8b96a8;vertical-alignment:center;horizontal-alignment:left;x:8px;width:max(0px,parent.width - 8px);}
+            query-input := TextInput {width:parent.width;height:parent.height;text <=> root.query;color:#263247;font-size:14px;text-cursor-width:1px;vertical-alignment:center;
+                edited=>{root.open=true;root.search();source-menu.show();}
+                changed has-focus=>{if self.has-focus {root.open=true;root.search();source-menu.show();}}
+                key-pressed(event)=>{if event.text==Key.Backspace && root.query=="" && root.selected-options.length>0 {root.remove-last();return accept;}return reject;}
+            }
+            TouchArea {enabled:!query-input.has-focus;mouse-cursor:text;clicked=>{query-input.focus();root.open=true;root.search();}}
+        }
+    }
+    source-menu := PopupWindow {x:0px;y:44px;width:root.width;height:116px;forward-focus:query-input;close-policy:close-on-click-outside;
+        Rectangle {background:#fff;border-width:1px;border-color:#dfe4eb;border-radius:4px;drop-shadow-blur:18px;drop-shadow-color:#1b2b451c;drop-shadow-offset-y:5px;
+        ScrollView {VerticalBox {padding:8px;spacing:2px;alignment:start;
+            for option in root.options: Rectangle {height:40px;background:option.chosen ? #f1f6ff : #fff;
+                Text {x:10px;width:max(0px,parent.width - 20px);text:option.label;color:#263247;vertical-alignment:center;overflow:elide;}
+                TouchArea{mouse-cursor:pointer;clicked=>{root.choose(option.id,!option.chosen);root.open=false;source-menu.close();}}
+            }
+        }}
+        }
+    }
+}
 // 宽屏侧栏和窄屏选择器复用目录操作，菜单始终针对当前选中的日志文件。
 component FileActions inherits Rectangle {
     in property <bool> enabled: true;
@@ -262,7 +301,12 @@ export component EditorWindow inherits Window {
     in property <[string]> file-titles;
     in property <string> active-file-label;
     in property <[LogFileChoice]> source-options;
+    in property <[LogFileChoice]> source-selected-options;
+    in-out property <string> source-query;
+    in-out property <bool> source-picker-open;
     callback choose-source(string, bool);
+    callback search-source();
+    callback remove-last-source();
     in-out property <bool> catalog-open;
     in-out property <string> catalog-id;
     in-out property <string> catalog-name;
@@ -665,9 +709,7 @@ export component EditorWindow inherits Window {
                         if root.show-errors && root.rule-name=="":Text{text:"请填写规则名称";color:#a54432;vertical-stretch:0;}
                         Text{text:"日志来源";font-size:16px;font-weight:600;vertical-stretch:0;}
                         Text{text:root.section==1 ? "选择一个已维护的日志文件" : "选择已维护的日志文件（可多选）";color:#748092;vertical-stretch:0;}
-                        ScrollView {height:144px;vertical-stretch:0;VerticalBox {padding:0;spacing:4px;alignment:start;
-                            for option in root.source-options: CheckBox {text:option.label;checked:option.chosen;toggled=>{root.choose-source(option.id,self.checked);}}
-                        }}
+                        SourcePicker {options:root.source-options;selected-options:root.source-selected-options;query <=> root.source-query;open <=> root.source-picker-open;choose(id,chosen)=>{root.choose-source(id,chosen);}search=>{root.search-source();}remove-last=>{root.remove-last-source();}}
                         if root.show-errors && root.source=="":Text{text:"请选择日志文件";color:#a54432;vertical-stretch:0;}
                         if root.wizard: Button{vertical-stretch:0;min-height:32px;text:"加载样例文件（可选）";clicked=>{root.load-sample();}}
                     }

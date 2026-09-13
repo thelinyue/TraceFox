@@ -65,6 +65,46 @@ fn show_main(ui: &AppWindow) {
         .with_winit_window(|window| window.focus_window());
 }
 
+/// 跨显示器时 Windows 会先改变窗口 DPI，再异步调整软件渲染缓冲区。
+/// 这里把关键窗口事件转换成一次显式重绘；DPI 切换额外重新提交当前物理尺寸，
+/// 让 Slint 的 software renderer 丢弃旧缓冲区，避免拖动后只剩背景或出现空白。
+fn recover_window_rendering(
+    window: &slint::Window,
+    event: &slint::winit_030::winit::event::WindowEvent,
+) {
+    use slint::winit_030::WinitWindowAccessor;
+    use slint::winit_030::winit::event::WindowEvent;
+
+    let scale_changed = matches!(event, WindowEvent::ScaleFactorChanged { .. });
+    let should_redraw = scale_changed
+        || matches!(
+            event,
+            WindowEvent::Resized(_) | WindowEvent::Focused(true) | WindowEvent::Occluded(false)
+        );
+    if !should_redraw {
+        return;
+    }
+
+    if scale_changed {
+        if let Some(size) = window.with_winit_window(|winit_window| winit_window.inner_size()) {
+            // 物理尺寸不变，只是重新走一遍后端的尺寸同步，避免旧 DPI 的绘制缓冲区残留。
+            window.set_size(slint::PhysicalSize::new(size.width, size.height));
+        } else {
+            eprintln!("TraceFox：窗口渲染恢复失败，未找到对应的 Windows 窗口句柄");
+        }
+    }
+    window.request_redraw();
+}
+
+/// 为没有其他 Winit 事件处理需求的窗口安装统一的跨屏重绘恢复器。
+fn install_window_rendering_recovery(window: &slint::Window) {
+    use slint::winit_030::{EventResult, WinitWindowAccessor};
+    window.on_winit_window_event(|window, event| {
+        recover_window_rendering(window, event);
+        EventResult::Propagate
+    });
+}
+
 fn open_report_path(path: &std::path::Path) -> Result<()> {
     anyhow::ensure!(
         path.is_file(),
@@ -677,7 +717,8 @@ pub fn run(startup: bool) -> Result<()> {
     {
         use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
         let state = state.clone();
-        ui.window().on_winit_window_event(move |_, event| {
+        ui.window().on_winit_window_event(move |window, event| {
+            recover_window_rendering(window, event);
             if let winit::event::WindowEvent::DroppedFile(path) = event {
                 enqueue(&mut state.borrow_mut(), path.clone());
             }
@@ -1487,30 +1528,46 @@ fn pos(s: &str, a: &[&str]) -> i32 {
     a.iter().position(|x| *x == s).unwrap_or(0) as i32
 }
 fn source_form_ids(e: &EditorWindow) -> Vec<String> {
-    e.get_source_options()
+    e.get_source_selected_options()
         .iter()
-        .filter(|option| option.chosen)
         .map(|option| option.id.to_string())
         .collect()
 }
-fn load_source_form(e: &EditorWindow, rules: &RuleSet, ids: &[String]) {
-    let mut options = rules
+/// 候选过滤只生成界面投影；已选来源由独立模型保存，搜索不会清空选择。
+/// 搜索同时覆盖日志名称、目录 ID、完整归档路径和路径末尾的文件名。
+fn source_choices(rules: &RuleSet, ids: &[String], query: &str) -> Vec<LogFileChoice> {
+    let query = query.trim().to_lowercase();
+    rules
         .log_files
         .iter()
+        .filter(|file| {
+            query.is_empty()
+                || file.id.to_lowercase().contains(&query)
+                || file.name.to_lowercase().contains(&query)
+                || file.path.to_lowercase().contains(&query)
+                || file.file_name().to_lowercase().contains(&query)
+        })
         .map(|file| LogFileChoice {
             id: file.id.clone().into(),
             label: file.label().into(),
             chosen: ids.contains(&file.id),
+            matching: true,
         })
+        .collect()
+}
+fn load_source_form(e: &EditorWindow, rules: &RuleSet, ids: &[String]) {
+    let options = source_choices(rules, ids, "");
+    let selected = options
+        .iter()
+        .filter(|option| option.chosen)
+        .cloned()
         .collect::<Vec<_>>();
-    // 打开表单时先显示已选来源，长目录中也能直接看见当前规则的配置。
-    options.sort_by_key(|option| {
-        ids.iter()
-            .position(|id| id == option.id.as_str())
-            .unwrap_or(usize::MAX)
-    });
     e.set_source_options(ModelRc::new(VecModel::from(options)));
-    e.set_source(rules.source_label(ids).into());
+    e.set_source_selected_options(ModelRc::new(VecModel::from(selected)));
+    let source = rules.source_label(ids);
+    e.set_source(source.clone().into());
+    e.set_source_query("".into());
+    e.set_source_picker_open(false);
 }
 fn load(e: &EditorWindow, d: &Draft) {
     if let Some(i) = d.selected {
@@ -1846,6 +1903,7 @@ fn reset_webdav_form(e: &EditorWindow, settings: &Settings) {
 
 fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
     let e = EditorWindow::new()?;
+    install_window_rendering_recovery(&e.window());
     // 跟随 Windows 动画偏好；原生 Slint 不使用浏览器媒体查询。
     let mut animations: i32 = 1;
     unsafe {
@@ -1882,17 +1940,53 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
             if chosen {
                 ids.push(id.to_string());
             }
-            // 勾选期间保持选项位置，避免重排后把下一次点击落到其他文件上。
-            let options = e
-                .get_source_options()
+            let options = source_choices(&draft.rules, &ids, "");
+            let selected = options
                 .iter()
-                .map(|mut option| {
-                    option.chosen = ids.iter().any(|id| id == option.id.as_str());
-                    option
-                })
+                .filter(|option| option.chosen)
+                .cloned()
                 .collect::<Vec<_>>();
             e.set_source_options(ModelRc::new(VecModel::from(options)));
+            e.set_source_selected_options(ModelRc::new(VecModel::from(selected)));
+            let source = draft.rules.source_label(&ids);
+            e.set_source(source.clone().into());
+            e.set_source_query("".into());
+            e.set_source_picker_open(false);
+        });
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_search_source(move || {
+            let Some(e) = w.upgrade() else { return };
+            let query = e.get_source_query();
+            let draft = d.borrow();
+            // 名称、ID 和归档路径统一做大小写不敏感的包含匹配。
+            let ids = source_form_ids(&e);
+            let options = source_choices(&draft.rules, &ids, query.as_str());
+            e.set_source_options(ModelRc::new(VecModel::from(options)));
+        });
+    }
+    {
+        let w = e.as_weak();
+        let d = d.clone();
+        e.on_remove_last_source(move || {
+            let Some(e) = w.upgrade() else { return };
+            let mut ids = source_form_ids(&e);
+            if ids.pop().is_none() {
+                return;
+            }
+            let draft = d.borrow();
+            let options = source_choices(&draft.rules, &ids, "");
+            let selected = options
+                .iter()
+                .filter(|option| option.chosen)
+                .cloned()
+                .collect::<Vec<_>>();
+            e.set_source_options(ModelRc::new(VecModel::from(options)));
+            e.set_source_selected_options(ModelRc::new(VecModel::from(selected)));
             e.set_source(draft.rules.source_label(&ids).into());
+            e.set_source_query("".into());
         });
     }
     {
@@ -2896,6 +2990,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                     return;
                 }
             };
+            install_window_rendering_recovery(&preview.window());
             preview.set_reference_only(reference);
             let warnings = incoming.validate().unwrap_or_default();
             preview.set_summary(
