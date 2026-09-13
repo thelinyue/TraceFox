@@ -35,19 +35,7 @@ fn rules() -> RuleSet {
     })
 }
 fn data(p: &std::path::Path) -> serde_json::Value {
-    let s = fs::read_to_string(p).unwrap();
-    let json = s
-        .split("const report=")
-        .nth(1)
-        .unwrap()
-        .split(";\nconst $")
-        .next()
-        .unwrap();
-    serde_json::Deserializer::from_str(json)
-        .into_iter::<serde_json::Value>()
-        .next()
-        .unwrap()
-        .unwrap()
+    common::report_data(p)
 }
 
 #[test]

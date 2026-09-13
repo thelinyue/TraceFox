@@ -6,6 +6,7 @@ import subprocess
 import time
 
 import psutil
+from report_data import load_report
 
 parser = argparse.ArgumentParser()
 parser.add_argument("samples", type=pathlib.Path)
@@ -30,8 +31,7 @@ for archive in sorted(args.samples.glob("*.tgz")):
     result = {"package": archive.name, "exit": proc.returncode, "seconds": round(time.monotonic()-started, 2), "peak_mb": round(peak/1048576, 1)}
     html = archive.with_suffix("") / "report.html"
     if proc.returncode == 0:
-        text = html.read_text(encoding="utf-8")
-        report, _ = json.JSONDecoder().raw_decode(text.split("const report=", 1)[1])
+        report = load_report(html)
         result.update(report_mb=round(html.stat().st_size/1048576, 2), events=len(report["events"]), hits=sum(f["count"] for f in report["findings"]), system_rows={t["id"]:len(t["rows"]) for t in report["system"]}, warnings=report["warnings"])
     results.append(result)
     args.output.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

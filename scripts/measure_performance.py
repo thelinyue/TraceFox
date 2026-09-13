@@ -10,6 +10,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'validation/python_deps'))
 import psutil
+from report_data import load_report
 
 parser = argparse.ArgumentParser()
 parser.add_argument('runner', type=Path, help='Release performance 测试可执行文件')
@@ -43,8 +44,7 @@ for repeat in range(3):
         measurement = next(line[5:] for line in log.read_text(encoding='utf-8').splitlines()
                            if line.startswith('PERF '))
         result = dict(json.loads(measurement), repeat=repeat, mode=mode, peak_mb=peak/1048576)
-        html = (archive.with_suffix('') / 'report.html').read_text(encoding='utf-8')
-        report, _ = json.JSONDecoder().raw_decode(html.split('const report=', 1)[1])
+        report = load_report(archive.with_suffix('') / 'report.html')
         report.pop('generated')
         (folder / f'{mode}-report.json').write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
         results.append(result)

@@ -704,7 +704,7 @@ export component EditorWindow inherits Window {
                         if root.show-errors && root.rule-name=="":Text{text:"请填写规则名称";color:#a54432;vertical-stretch:0;}
                         Text{text:"日志来源";font-size:16px;font-weight:600;vertical-stretch:0;}
                         Text{text:root.section==1 ? "选择一个已维护的日志文件" : "选择已维护的日志文件（可多选）";color:#748092;vertical-stretch:0;}
-                        SourcePicker {options:root.source-options;selected-options:root.source-selected-options;query <=> root.source-query;open <=> root.source-picker-open;choose(id,chosen)=>{root.choose-source(id,chosen);}search=>{root.search-source();}remove-last=>{root.remove-last-source();}}
+                        if root.dialog-open: SourcePicker {options:root.source-options;selected-options:root.source-selected-options;query <=> root.source-query;open <=> root.source-picker-open;choose(id,chosen)=>{root.choose-source(id,chosen);}search=>{root.search-source();}remove-last=>{root.remove-last-source();}}
                         if root.show-errors && root.source=="":Text{text:"请选择日志文件";color:#a54432;vertical-stretch:0;}
                         if root.wizard: Button{vertical-stretch:0;min-height:32px;text:"加载样例文件（可选）";clicked=>{root.load-sample();}}
                     }

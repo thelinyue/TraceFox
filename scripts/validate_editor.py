@@ -100,7 +100,7 @@ for scale in [1,1.5]:
         select_file(e,'测试内核日志');assert input_value(e,'changed');assert len([b for b in controls(e,'Button') if b.window_text()=='共享规则'])==1
         c=input_value(e,'changed');c.set_focus();c.set_edit_text('discard');c.type_keys('{ESC}');time.sleep(.3);assert input_value(e,'changed')
         # Drawer text edits go only to its private copy; closing restores the main draft.
-        open_rule(e,'共享规则');query=source_query(e);query.set_focus();query.click_input();time.sleep(.3);source_rect=query.rectangle()
+        open_rule(e,'共享规则');query=source_query(e);query.click_input();time.sleep(.3);source_rect=query.rectangle()
         assert wait_source_option(e,'块设备信息',source_rect) is not None
         assert wait_source_option(e,'内核启动日志',source_rect) is not None
         assert not any(b.window_text()=='保存全部' for b in controls(e,'Button'))
@@ -115,7 +115,8 @@ for scale in [1,1.5]:
         open_rule(e,'共享规则');input_value(e,'changed').set_edit_text('drawer-saved');click(e,'完成');assert input_value(e,'drawer-saved')
         assert config.read_bytes()==initial
         # Add and remove a term without replacing the rule entity.
-        edits=controls(e,'Edit');blank=[c for c in edits if c.get_value()==''][-1]
+        add_term=button(e,'添加匹配内容')
+        blank=next(c for c in controls(e,'Edit') if c.get_value()=='' and abs(c.rectangle().top-add_term.rectangle().top)<5)
         blank.set_edit_text('extra');blank.type_keys('{ENTER}');time.sleep(.3);assert input_value(e,'extra')
         next(b for b in controls(e,'Button') if b.window_text()=='删除匹配内容' and abs(b.rectangle().top-input_value(e,'extra').rectangle().top)<5).invoke();time.sleep(.3)
         assert not any(c.get_value()=='extra' for c in controls(e,'Edit'))
@@ -126,12 +127,14 @@ for scale in [1,1.5]:
         assert rule_toggle(e,'共享规则').window_text()=='已禁用'
         if scale==1 and '--rule-controls-only' not in sys.argv:
             # Native actions: reorder across report groups, copy/cancel, delete, wizard and preview.
+            select_file(e,'测试系统日志')
             menu(e,'共享规则');click(e,'下移')
-            assert [b.window_text() for b in controls(e,'Button') if b.window_text() in ['共享规则','第二条规则']]==['第二条规则','共享规则']
+            order=[b.window_text() for b in controls(e,'Button') if b.window_text() in ['共享规则','第二条规则']]
+            assert order==['第二条规则','共享规则'],order
             menu(e,'共享规则');click(e,'复制');click(e,'取消')
             menu(e,'共享规则');click(e,'复制');click(e,'完成')
             scroll(e,-5);menu(e,'共享规则 副本');click(e,'删除');scroll(e,20)
-            click(e,'添加规则到当前日志文件');query=source_query(e);query.set_focus();query.click_input();time.sleep(.3);source_rect=query.rectangle()
+            click(e,'添加规则到当前日志文件');query=source_query(e);query.click_input();time.sleep(.3);source_rect=query.rectangle()
             assert wait_source_option(e,'块设备信息',source_rect) is not None
             click(e,'下一步');assert any('请填写' in c.window_text() for c in e.descendants(control_type='Text'))
             controls(e,'Edit')[0].set_edit_text('新增测试');click(e,'下一步')
@@ -161,6 +164,7 @@ for scale in [1,1.5]:
             click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
         # Small window uses the file picker; all drawer actions remain visible.
         native=Desktop(backend='win32').window(handle=e.handle);native.move_window(x=0,y=0,width=round(800*scale),height=round(580*scale));time.sleep(.4)
+        click(e,'关键词')
         assert controls(e,'ComboBox');capture(e,'file-compact-'+label+'.png')
         open_rule(e,'共享规则');capture(e,'file-full-editor-'+label+'.png')
         rect=e.rectangle();finish=button(e,'完成').rectangle();assert rect.top<=finish.top<finish.bottom<=rect.bottom

@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.0.1"
+  #define AppVersion "0.0.2"
 #endif
 
 ; 按用户安装，规则目录可写；升级和卸载均保留用户修改的规则。

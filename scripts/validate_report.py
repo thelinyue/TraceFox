@@ -1,5 +1,7 @@
 """用浏览器验证当前离线模板；真实报告只读取数据，另生成验证副本。"""
 import argparse
+import base64
+import gzip
 import json
 import pathlib
 import sys
@@ -9,6 +11,7 @@ deps = root / "validation" / "python_deps"
 if deps.exists():
     sys.path.insert(0, str(deps))
 from playwright.sync_api import sync_playwright
+from report_data import load_report
 
 
 def fixture():
@@ -81,12 +84,23 @@ def fixture():
                 warnings=["日志读取失败 logs/storage.log：测试提示"])
 
 
-def write_report(path, data, template):
-    # 与生成器一样转义嵌入脚本的数据，样本里的 HTML 不参与执行。
-    encoded = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+def write_payload(path, payload, template):
+    encoded = json.dumps(payload, ensure_ascii=False)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(template.replace("/*REPORT_DATA*/null", encoded), encoding="utf-8")
     return path
+
+
+def write_report(path, data, template, compressed=True):
+    """默认生成正式压缩格式；对象格式用于覆盖测试夹具兼容分支。"""
+    if compressed:
+        raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
+        payload = "gzip-base64-v1:" + base64.b64encode(
+            gzip.compress(raw, compresslevel=9, mtime=0)
+        ).decode()
+    else:
+        payload = data
+    return write_payload(path, payload, template)
 
 
 parser = argparse.ArgumentParser()
@@ -211,7 +225,7 @@ with sync_playwright() as p:
     # 无系统数据、无命中和独立 SMART 是合法的规则配置。
     empty = fixture()
     empty.update(findings=[], events=[], system=[], warnings=[])
-    load(write_report(folder / "empty/report.html", empty, template))
+    load(write_report(folder / "empty/report.html", empty, template, compressed=False))
     assert "未找到关键词匹配" in page.locator("#findings").inner_text()
     preview = fixture()
     preview["findings"] = []
@@ -258,11 +272,27 @@ with sync_playwright() as p:
     if args.samples:
         page.set_viewport_size({"width": 1440, "height": 1000})
         for original in sorted(args.samples.glob("*/report.html")):
-            raw = original.read_text(encoding="utf-8").split("const report=", 1)[1]
-            sample, _ = json.JSONDecoder().raw_decode(raw)
+            sample = load_report(original)
             load(write_report(folder / "samples" / original.parent.name / "report.html", sample, template))
             page.locator("#navigation").get_by_role("button", name=sample["layout"]["system_title"], exact=True).click()
             results.append({"report": original.parent.name, "passed": True})
+
+    broken = write_payload(folder / "broken/report.html", "gzip-base64-v1:not-base64", template)
+    failure = browser.new_page()
+    failure.goto(broken.as_uri())
+    failure.wait_for_function("document.body.dataset.ready==='error'")
+    assert "报告数据解压或解析失败" in failure.locator("#findings").inner_text()
+    failure.close()
+
+    unsupported = browser.new_page()
+    unsupported.add_init_script(
+        "Object.defineProperty(globalThis,'DecompressionStream',{value:undefined,configurable:true})"
+    )
+    unsupported.goto(report.as_uri())
+    unsupported.wait_for_function("document.body.dataset.ready==='error'")
+    assert "请使用最新版 Edge 或 Chrome" in unsupported.locator("#findings").inner_text()
+    unsupported.close()
+    results.append({"report": "compressed-errors", "passed": True})
     assert not errors, errors
     assert not remote, remote
     browser.close()

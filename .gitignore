@@ -1,4 +1,5 @@
 /target/
 /dist/
 /validation/
+__pycache__/
 *.tmp

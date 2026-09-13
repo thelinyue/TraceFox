@@ -3,8 +3,9 @@ use crate::{
     rules::{Matcher, Rule, RuleSet},
 };
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
-use flate2::read::MultiGzDecoder;
+use flate2::{Compression, read::MultiGzDecoder, write::GzEncoder};
 use regex::Regex;
 use serde::Serialize;
 use std::{
@@ -668,6 +669,35 @@ pub struct Report {
     pub timeline_warnings: Vec<String>,
     pub warnings: Vec<String>,
 }
+
+const REPORT_PAYLOAD_PREFIX: &str = "gzip-base64-v1:";
+
+/// 将完整报告 JSON 流式压缩后编码为脚本安全的 Base64 字符串。
+///
+/// 报告仍保留原始 JSON 数据模型，压缩只改变 HTML 内的传输形式。Base64 字符集不含
+/// `<`、`>` 和 `&`，因此诊断日志无法闭合 script 标签或注入页面代码。
+fn encode_report_payload<T: Serialize>(value: &T) -> Result<String> {
+    let mut gzip = GzEncoder::new(Vec::new(), Compression::best());
+    serde_json::to_writer(&mut gzip, value).context("序列化报告数据失败")?;
+    let compressed = gzip.finish().context("压缩报告数据失败")?;
+    Ok(format!(
+        "{REPORT_PAYLOAD_PREFIX}{}",
+        BASE64.encode(compressed)
+    ))
+}
+
+/// 写入单文件离线报告；模板和压缩数据分段输出，避免构造完整 HTML 副本。
+fn write_report_document<W: Write, T: Serialize>(out: &mut W, value: &T) -> Result<()> {
+    let (prefix, suffix) = include_str!("../assets/report.html")
+        .split_once("/*REPORT_DATA*/null")
+        .expect("报告模板包含数据插入位置");
+    let payload = encode_report_payload(value)?;
+    out.write_all(prefix.as_bytes())?;
+    serde_json::to_writer(&mut *out, &payload)?;
+    out.write_all(suffix.as_bytes())?;
+    Ok(())
+}
+
 /// 报告每条规则只内嵌前 500 个命中（沿用报告排序），扫描和总数保持完整。
 /// 截断发生在时间线证据组装之后，不影响时间线；最后一个保留命中的
 /// 后文延续到下一个未保留命中之前，避免将被省略的命中伪装成普通上下文。
@@ -1832,14 +1862,9 @@ pub fn analyze_with_workers(
     let tmp = root.join("report.html.tmp");
     safe_target(&root, Path::new("report.html.tmp"))?;
     safe_target(&root, Path::new("report.html"))?;
-    let (prefix, suffix) = include_str!("../assets/report.html")
-        .split_once("/*REPORT_DATA*/null")
-        .expect("报告模板包含数据插入位置");
     {
         let mut out = BufWriter::with_capacity(128 * 1024, File::create(&tmp)?);
-        out.write_all(prefix.as_bytes())?;
-        serde_json::to_writer(HtmlJsonWriter(&mut out), &report)?;
-        out.write_all(suffix.as_bytes())?;
+        write_report_document(&mut out, &report)?;
         out.flush()?;
     }
     check(cancel)?;
@@ -1878,30 +1903,6 @@ fn infer_raid_by_pool(block: &Table) -> std::collections::HashMap<String, String
     }
     raid_by_pool
 }
-/// 流式转义内嵌 JSON，避免脚本标签注入，同时不构造完整 JSON 和 HTML 副本。
-struct HtmlJsonWriter<W>(W);
-impl<W: Write> Write for HtmlJsonWriter<W> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        let mut start = 0;
-        for (index, byte) in bytes.iter().enumerate() {
-            let escaped: &[u8] = match byte {
-                b'&' => br"\u0026",
-                b'<' => br"\u003c",
-                b'>' => br"\u003e",
-                _ => continue,
-            };
-            self.0.write_all(&bytes[start..index])?;
-            self.0.write_all(escaped)?;
-            start = index + 1;
-        }
-        self.0.write_all(&bytes[start..])?;
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.0.flush()
-    }
-}
-
 pub fn replace_file(from: &Path, to: &Path) -> Result<()> {
     #[cfg(windows)]
     {
@@ -2044,34 +2045,42 @@ pub fn preview(rules: &RuleSet, index: usize, system: bool, text: &str) -> Resul
     if rules.layout.timeline_sort == "desc" {
         report.timeline_sessions.reverse();
     }
-    let json = serde_json::to_string(&report)?
-        .replace('&', "\\u0026")
-        .replace('<', "\\u003c")
-        .replace('>', "\\u003e");
-    Ok(include_str!("../assets/report.html").replace("/*REPORT_DATA*/null", &json))
+    let mut html = Vec::new();
+    write_report_document(&mut html, &report)?;
+    String::from_utf8(html).context("报告模板不是有效的 UTF-8")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn streamed_json_matches_existing_escaping_and_propagates_write_errors() {
+    fn compressed_payload_round_trips_and_is_script_safe() {
         let value = serde_json::json!({"文本": "</script>&>中文\\u003c\n\"", "rows": [1, 2]});
-        let expected = serde_json::to_string(&value)
-            .unwrap()
-            .replace('&', "\\u0026")
-            .replace('<', "\\u003c")
-            .replace('>', "\\u003e");
+        let payload = encode_report_payload(&value).unwrap();
+        assert!(payload.starts_with(REPORT_PAYLOAD_PREFIX));
+        assert!(
+            !payload
+                .bytes()
+                .any(|byte| matches!(byte, b'<' | b'>' | b'&'))
+        );
+        let compressed = BASE64
+            .decode(payload.strip_prefix(REPORT_PAYLOAD_PREFIX).unwrap())
+            .unwrap();
+        let mut decoder = flate2::read::GzDecoder::new(compressed.as_slice());
         let mut actual = Vec::new();
-        serde_json::to_writer(HtmlJsonWriter(&mut actual), &value).unwrap();
-        assert_eq!(actual, expected.as_bytes());
+        decoder.read_to_end(&mut actual).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&actual).unwrap(),
             value
         );
+    }
+
+    #[test]
+    fn compressed_report_propagates_write_errors() {
+        let value = serde_json::json!({"rows": [1, 2]});
         // 固定容量输出模拟磁盘写入失败，错误必须返回，不能伪报成功。
         let mut short = [0; 5];
-        assert!(serde_json::to_writer(HtmlJsonWriter(&mut short[..]), &value).is_err());
+        assert!(write_report_document(&mut short.as_mut_slice(), &value).is_err());
     }
     #[test]
     fn rejects_escape() {

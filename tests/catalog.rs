@@ -1,3 +1,4 @@
+mod common;
 use std::{fs, sync::atomic::AtomicBool};
 use tracefox::{
     engine,
@@ -158,13 +159,7 @@ fn analysis_and_preview_resolve_directory_and_keep_internal_groups() {
         mode: "exact".into(),
     }];
     let report = engine::analyze(&path, &r, &AtomicBool::new(false), |_| {}).unwrap();
-    let html = fs::read_to_string(report).unwrap();
-    let data = html.split("const report=").nth(1).unwrap();
-    let json: serde_json::Value = serde_json::Deserializer::from_str(data)
-        .into_iter::<serde_json::Value>()
-        .next()
-        .unwrap()
-        .unwrap();
+    let json = common::report_data(&report);
     assert_eq!(json["findings"][0]["count"], 1);
     assert_eq!(json["findings"][0]["rule"]["group"], "internal-group");
     assert_eq!(json["findings"][0]["fragments"][0]["file"], "log/b.log");
@@ -180,7 +175,10 @@ fn analysis_and_preview_resolve_directory_and_keep_internal_groups() {
             .contains("自定义中文名")
     );
     let preview = engine::preview(&r, 0, false, "error").unwrap();
-    assert!(preview.contains("自定义中文名"));
+    assert_eq!(
+        common::report_data_html(&preview)["log_files"][0]["name"],
+        "自定义中文名"
+    );
 }
 #[test]
 fn imports_remap_directory_ids_without_losing_multi_file_references() {

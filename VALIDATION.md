@@ -1,16 +1,17 @@
-# TraceFox 0.0.1 发布验证
+# TraceFox 0.0.2 发布验证
 
-验证日期：2026-09-12。Windows x64，当前用户 EXE 安装包。
+验证日期：2026-09-13。Windows x64，本地 Release EXE；安装包由标签触发的 GitHub Actions 构建。
 
-- `cargo test --locked`：57 项通过；1 项需真实样本副本的手动性能测量跳过。
-- `cargo build --release --locked`：通过，程序文件版本与产品版本均为 0.0.1。
+- `cargo test --locked`：72 项通过；1 项需真实样本副本的手动性能测量跳过。
+- `cargo build --release --locked`：通过，程序文件版本与产品版本均为 0.0.2。
 - `node scripts/test_storage_health.cjs`：通过。
-- `scripts/validate_report.py`：搜索跨分页定位、磁盘行内详情关联、空结果、独立存储数据、两万行倒序证据、明暗主题及移动端无整页溢出验证通过，无浏览器脚本错误或外部网络请求。
-- `scripts/validate_installer.py`：实际安装启动、还原后取消、还原后保存、重启、合成 TGZ 报告生成、升级保留规则、卸载保留规则均通过。
+- `scripts/validate_report.py`：压缩报告加载与错误提示、搜索跨分页定位、磁盘行内详情关联、空结果、独立存储数据、两万行倒序证据、明暗主题及移动端无整页溢出验证通过，无浏览器脚本错误或外部网络请求。
+- `scripts/validate_startup.py`、`scripts/validate_editor.py`、`scripts/validate_catalog.py`、`scripts/validate_compact.py`、`scripts/validate_tasks.py`、`scripts/validate_window_rendering.py`：隔离配置下的启动设置、规则与日志目录、紧凑布局、任务生命周期和窗口重绘验证通过，覆盖 100%/150% 缩放。
 - `scripts/validate_webdav.py`：本地 HTTP 服务验证下载/同步保存路径一致、规则写入失败保留旧文件；设置测试不落盘、凭据回滚、重启、错误提示及 100%/150% 窗口验证通过。
+- `scripts/validate_installer.py`：本机缺少 Inno Setup 6，未对 0.0.2 安装包重跑；标签推送后由 GitHub Actions 构建，发布完成后单独核对附件。
 - 发布前检查了全部历史文件中的诊断归档扩展名及常见凭据格式，未发现匹配项；这不等于穷尽所有敏感信息检测。
 
-上述结果来自本地发布构建。实际公网 WebDAV 服务、其他 Windows 设备和代码签名未验证；正式 GitHub Actions 及附件状态在推送后单独核对。不将下面的历史样本结论当作本次复测结果。
+除明确标注待 GitHub Actions 完成的安装包外，上述结果来自本地构建。实际公网 WebDAV 服务、其他 Windows 设备和代码签名未验证；正式 GitHub Actions 及附件状态在推送后单独核对。不将下面的历史样本结论当作本次复测结果。
 
 ---
 

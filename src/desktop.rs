@@ -2487,6 +2487,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                 return;
             }
             d.borrow_mut().editing = None;
+            e.set_source_picker_open(false);
             e.set_dialog_open(false);
             e.set_feedback("".into());
             e.invoke_focus_list();
@@ -2811,6 +2812,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                     d.rules = edit.rules;
                     d.select_id(id.as_deref());
                     d.editing = None;
+                    e.set_source_picker_open(false);
                     e.set_dialog_open(false);
                     e.set_dirty(true);
                     e.set_feedback("修改已加入草稿，保存全部后生效。".into());

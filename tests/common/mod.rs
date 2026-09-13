@@ -1,5 +1,42 @@
 //! 为既有分析算法测试构建目录。Source 在这些测试中只是测试数据，生产代码不会自动重建目录。
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use std::io::Read;
 use tracefox::rules::{LogFile, RuleSet, Source};
+
+/// 解码生成报告，供集成测试继续按完整业务 JSON 断言新旧两种格式。
+pub fn report_data_html(html: &str) -> serde_json::Value {
+    if let Some(data) = html.split("const reportPayload=").nth(1) {
+        let payload = serde_json::Deserializer::from_str(data)
+            .into_iter::<serde_json::Value>()
+            .next()
+            .unwrap()
+            .unwrap();
+        if payload.is_object() {
+            return payload;
+        }
+        let encoded = payload
+            .as_str()
+            .unwrap()
+            .strip_prefix("gzip-base64-v1:")
+            .unwrap();
+        let compressed = BASE64.decode(encoded).unwrap();
+        let mut gzip = flate2::read::GzDecoder::new(compressed.as_slice());
+        let mut json = Vec::new();
+        gzip.read_to_end(&mut json).unwrap();
+        return serde_json::from_slice(&json).unwrap();
+    }
+    let data = html.split("const report=").nth(1).unwrap();
+    serde_json::Deserializer::from_str(data)
+        .into_iter::<serde_json::Value>()
+        .next()
+        .unwrap()
+        .unwrap()
+}
+
+pub fn report_data(path: &std::path::Path) -> serde_json::Value {
+    report_data_html(&std::fs::read_to_string(path).unwrap())
+}
+
 pub fn catalog(input: &RuleSet) -> RuleSet {
     let mut rules = input.clone();
     let mut files = Vec::<LogFile>::new();

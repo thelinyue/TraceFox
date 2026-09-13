@@ -36,7 +36,7 @@ for scale in [1,1.5]:
         try:
             time.sleep(2);app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);app.wait('visible',timeout=10)
             assert 'old.tgz' not in texts(app)
-            buttons(app,'暂停监控')[-1].click_input();wait(lambda:not json.loads((profile/'TraceFox/settings.json').read_text(encoding='utf-8'))['watching'])
+            buttons(app,'暂停监控')[-1].iface_toggle.Toggle();wait(lambda:not json.loads((profile/'TraceFox/settings.json').read_text(encoding='utf-8'))['watching'])
             button=buttons(app,'开启监控')[-1];button.set_focus();app.type_keys('{SPACE}');wait(lambda:json.loads((profile/'TraceFox/settings.json').read_text(encoding='utf-8'))['watching'])
             print('monitor after keyboard',json.loads((profile/'TraceFox/settings.json').read_text())['watching'],flush=True)
             new=watch/'new.tgz';package(new)
@@ -62,7 +62,7 @@ for scale in [1,1.5]:
             assert bad.exists() and old.exists() and untouched.exists()
             assert not new.with_suffix('').exists();assert any('成功 1' in t for t in texts(app))
             # 损坏包只有删除；取消确认保留，确认后保留旁边的旧报告目录。
-            prior=bad.with_suffix('');prior.mkdir();(prior/'report.html').write_text('old report')
+            prior=bad.with_suffix('');prior.mkdir(exist_ok=True);(prior/'report.html').write_text('old report')
             click(app,'删除');dialog=Desktop(backend='uia').window(title='删除损坏的压缩包',process=proc.pid);dialog.wait('visible',timeout=10)
             dialog.child_window(auto_id='7',control_type='Button').invoke();assert bad.exists()
             click(app,'删除');dialog.wait('visible',timeout=10);dialog.child_window(auto_id='6',control_type='Button').invoke()
