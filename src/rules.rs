@@ -36,6 +36,93 @@ pub struct RuleSet {
     pub system: Vec<SystemRule>,
     #[serde(default)]
     pub layout: Layout,
+    /// 时间线专用配置。缺失时使用空配置，旧规则仍由 rules.target 兼容执行。
+    #[serde(default)]
+    pub timeline: TimelineConfig,
+}
+
+/// 时间线事实识别、会话判定和阈值配置；采用数据驱动结构，便于高级 JSON 维护。
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TimelineConfig {
+    #[serde(default)]
+    pub events: Vec<TimelineEventRule>,
+    #[serde(default)]
+    pub judgements: Vec<TimelineJudgementRule>,
+    #[serde(default)]
+    pub thresholds: TimelineThresholds,
+    #[serde(default)]
+    pub sources: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimelineEventRule {
+    pub id: String,
+    pub event_type: String,
+    #[serde(default)]
+    pub source_file_ids: Vec<String>,
+    #[serde(default)]
+    pub terms: Vec<String>,
+    #[serde(default)]
+    pub regex: bool,
+    #[serde(default = "default_evidence_strength")]
+    pub evidence_strength: String,
+    #[serde(default)]
+    pub time_regex: String,
+    #[serde(default)]
+    pub time_format: String,
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimelineJudgementRule {
+    pub id: String,
+    #[serde(default)]
+    pub start_event: String,
+    #[serde(default)]
+    pub end_event: String,
+    #[serde(default)]
+    pub must_have: Vec<String>,
+    #[serde(default)]
+    pub must_not_have: Vec<String>,
+    #[serde(default)]
+    pub any_of: Vec<String>,
+    #[serde(default)]
+    pub output: String,
+    #[serde(default = "default_confidence")]
+    pub confidence: String,
+    #[serde(default)]
+    pub limitation: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TimelineThresholds {
+    #[serde(default = "default_match_window_seconds")]
+    pub match_window_seconds: u64,
+    #[serde(default = "default_gap_seconds")]
+    pub gap_seconds: u64,
+}
+
+impl Default for TimelineThresholds {
+    fn default() -> Self {
+        Self {
+            match_window_seconds: default_match_window_seconds(),
+            gap_seconds: default_gap_seconds(),
+        }
+    }
+}
+
+fn default_evidence_strength() -> String {
+    "medium".into()
+}
+fn default_confidence() -> String {
+    "medium".into()
+}
+fn default_match_window_seconds() -> u64 {
+    300
+}
+fn default_gap_seconds() -> u64 {
+    120
 }
 
 /// 日志文件目录项，规则和报告通过此目录统一解析显示名称与来源。
@@ -546,6 +633,8 @@ impl RuleSet {
     pub fn merge(&self, incoming: &Self, replace: bool) -> Result<Self> {
         let mut out = self.clone();
         let mut incoming = incoming.clone();
+        // 导入旧规则时先保留原文并在预览中提示；用户确认合并后再生成基础事实事件。
+        incoming.migrate_legacy_timeline_rules();
         out.merge_catalog(&mut incoming, replace);
         for r in &incoming.rules {
             let found = out.rules.iter().position(|x| x.id == r.id);
@@ -781,6 +870,18 @@ impl RuleSet {
             if !r.regex && r.terms.iter().any(|s| s.contains(".*")) {
                 warnings.push(format!("「{}」包含 .*，但使用普通关键词匹配", r.name));
             }
+            if r.target == "timeline"
+                && self
+                    .timeline
+                    .events
+                    .iter()
+                    .all(|event| event.id != format!("legacy-{}", r.id))
+            {
+                warnings.push(format!(
+                    "旧时间线规则「{}」将在导入时迁移为基础事实事件",
+                    r.name
+                ));
+            }
         }
         for (i, r) in self.rules.iter().enumerate() {
             if self.rules[..i].iter().any(|x| {
@@ -855,6 +956,77 @@ impl RuleSet {
                 bail!("「{}」关联配置不完整", s.name);
             }
         }
+        let mut timeline_ids = std::collections::HashSet::new();
+        let event_types = [
+            "boot",
+            "systemd_ready",
+            "shutdown_request",
+            "shutdown_complete",
+            "reboot_request",
+            "reboot_complete",
+            "kernel_panic",
+            "watchdog_reset",
+            "hardware_reset",
+            "power_loss_hint",
+            "filesystem_recovery",
+            "device_reenumeration",
+            "log_gap",
+            "reset_reason",
+            "evidence",
+        ];
+        for event in &self.timeline.events {
+            if event.id.trim().is_empty() || !timeline_ids.insert(&event.id) {
+                bail!("时间线事实事件标识重复或为空：{}", event.id);
+            }
+            if !event_types.contains(&event.event_type.as_str()) {
+                bail!(
+                    "时间线事实事件「{}」类型不支持：{}",
+                    event.id,
+                    event.event_type
+                );
+            }
+            if event.terms.is_empty() {
+                bail!("时间线事实事件「{}」至少需要一个关键词", event.id);
+            }
+            if !["strong", "medium", "weak"].contains(&event.evidence_strength.as_str()) {
+                bail!(
+                    "时间线事实事件「{}」证据等级不支持：{}",
+                    event.id,
+                    event.evidence_strength
+                );
+            }
+            for id in &event.source_file_ids {
+                self.log_file(id).with_context(|| {
+                    format!("时间线事实事件「{}」引用的日志不存在：{}", event.id, id)
+                })?;
+            }
+            if event.regex {
+                for term in &event.terms {
+                    Regex::new(term)
+                        .with_context(|| format!("时间线事实事件「{}」正则无效", event.id))?;
+                }
+            }
+        }
+        for judgement in &self.timeline.judgements {
+            if judgement.id.trim().is_empty() || !timeline_ids.insert(&judgement.id) {
+                bail!("时间线判定规则标识重复或为空：{}", judgement.id);
+            }
+            if judgement.output.trim().is_empty() {
+                bail!("时间线判定规则「{}」必须填写输出结论", judgement.id);
+            }
+            if !["high", "medium", "low"].contains(&judgement.confidence.as_str()) {
+                bail!(
+                    "时间线判定规则「{}」置信度不支持：{}",
+                    judgement.id,
+                    judgement.confidence
+                );
+            }
+        }
+        if self.timeline.thresholds.match_window_seconds == 0
+            || self.timeline.thresholds.gap_seconds == 0
+        {
+            bail!("时间线匹配窗口和日志断档阈值必须大于 0 秒");
+        }
         if !Regex::new(r"^#[0-9a-fA-F]{6}$")?.is_match(&self.layout.accent)
             || !(10..=24).contains(&self.layout.font_size)
         {
@@ -871,6 +1043,27 @@ impl RuleSet {
         rules.validate()?;
         rules.resolve_sources()?;
         Ok(rules)
+    }
+
+    /// 将旧 target=timeline 规则转换为基础事实规则，只迁移识别条件，不猜测会话语义。
+    fn migrate_legacy_timeline_rules(&mut self) {
+        for rule in self.rules.iter().filter(|r| r.target == "timeline") {
+            let id = format!("legacy-{}", rule.id);
+            if self.timeline.events.iter().any(|event| event.id == id) {
+                continue;
+            }
+            self.timeline.events.push(TimelineEventRule {
+                id,
+                event_type: "evidence".into(),
+                source_file_ids: rule.source_file_ids.clone(),
+                terms: rule.terms.clone(),
+                regex: rule.regex,
+                evidence_strength: "medium".into(),
+                time_regex: rule.time_regex.clone(),
+                time_format: rule.time_format.clone(),
+                note: rule.note.clone(),
+            });
+        }
     }
 }
 fn validate_source(s: &Source) -> Result<()> {

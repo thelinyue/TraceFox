@@ -31,6 +31,7 @@ fn rules() -> RuleSet {
         }],
         system: vec![],
         layout: Default::default(),
+        timeline: Default::default(),
     })
 }
 fn data(p: &std::path::Path) -> serde_json::Value {

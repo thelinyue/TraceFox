@@ -42,18 +42,43 @@ def fixture():
                                       dict(name="Current", path="value", missing="")],
                  rows=[{"属性": "Reallocated_Sector_Ct", "Raw": "0", "Current": "100"},
                        {"属性": "media_errors", "Raw": "2", "Current": "99"}], storage=storage)
+    event = dict(name="设备复位原因", group="系统事件", time="2026-09-11T10:00:00+08:00",
+                 key="2026-09-11T02:00:00Z", note="原始技术说明 UNKNOWN",
+                 event_type="reset_reason", evidence_strength="strong", time_precision="exact",
+                 sources=[a])
+
+    def session(id, time, classification, confidence="高", end=None, precision="exact"):
+        return dict(session_id=id, boot_time=time, boot_time_precision="exact",
+                    incident_time_start=time, incident_time_end=end,
+                    incident_time_precision=precision, boot_id="fixture-boot-id",
+                    facts=[event], end_classification=classification, confidence=confidence,
+                    supporting_evidence=["硬盘在启动过程中被重新识别"],
+                    limitations=["设备自身没有记录明确原因"])
+
+    sessions = [
+        session("s7", "2026-09-11T10:00:00+08:00", "疑似断电", "中",
+                "2026-09-11T10:03:00+08:00", "range"),
+        session("s6", "2026-09-11T09:00:00+08:00", "硬件复位"),
+        session("s5", "2026-09-11T08:00:00+08:00", "Watchdog 重启"),
+        session("s4", "2026-09-11T07:00:00+08:00", "Kernel Panic 重启"),
+        session("s3", "2026-09-11T06:00:00+08:00", "正常重启"),
+        session("s2", "2026-09-11T05:00:00+08:00", "正常关机"),
+        session("s1", "2026-09-11T04:00:00+08:00", "未知复位", "低", precision="unknown"),
+    ]
     return dict(log_files=[dict(id=id,name=name,path=path,mode="exact",container="diagnostic_archive") for id,name,path in [("kern","内核日志","logs/kern.log"),("storage","存储日志","logs/storage.log"),("event","事件日志","logs/event.log"),("disk","设备信息","disk.json")]],
                 source_labels={"logs/kern.log":"内核日志 · kern.log","logs/storage.log":"存储日志 · storage.log"},
                 source_catalog={"logs/kern.log":["kern"],"logs/storage.log":["storage"],"logs/event.log":["event"]},
                 system_file_ids={"disks":"disk","smart":"disk"},package="测试诊断包.tgz", generated="2026-09-11 12:00:00",
                 layout=dict(title="诊断信息汇总", system_title="系统信息", keyword_title="关键词线索",
                             timeline_title="事件时间线", sections=["keywords", "timeline"], accent="#2468d8",
-                            font_size=14, density="comfortable", first_open=True, log_lines_per_batch=50),
+                            font_size=14, density="comfortable", timeline_sort="desc",
+                            first_open=True, log_lines_per_batch=50),
                 findings=[finding("SATA 链路记录", 3, [a, overlap, b]),
                           finding("未命中规则", 0, []),
                           finding("时间线规则", 1, [fragment("logs/event.log", 1, 2, {1})], "timeline")],
-                events=[dict(name="设备事件", group="存储服务", time=a["time"], key=a["time"], note="辅助查看",
-                             sources=[a])], system=[base, smart], warnings=["日志读取失败 logs/storage.log：测试提示"])
+                events=[event], timeline_facts=[event], timeline_sessions=sessions,
+                timeline_warnings=[], system=[base, smart],
+                warnings=["日志读取失败 logs/storage.log：测试提示"])
 
 
 def write_report(path, data, template):
@@ -112,6 +137,49 @@ with sync_playwright() as p:
     search("TARGET")
     page.locator("#search-results button").filter(has_text="时间线").click()
     assert page.locator("#timeline .line.target").get_attribute("data-line") == "250"
+    # 时间线默认按倒序显示通俗结论，技术术语只在第二层详情中出现。
+    page.locator("#navigation").get_by_role("button", name="事件时间线 · 7", exact=True).click()
+    cards = page.locator("#events .session-card")
+    assert cards.count() == 7
+    first = cards.first
+    assert first.locator(".session-time").inner_text() == "约 09-11 10:00–10:03"
+    assert first.locator(".session-time").get_attribute("title") == (
+        "2026-09-11T10:00:00+08:00 至 2026-09-11T10:03:00+08:00"
+    )
+    assert first.locator(".session-result").inner_text() == "疑似断电"
+    assert "判断把握" not in first.locator(".session-head").inner_text()
+    assert page.locator("#events .session-result").all_text_contents() == [
+        "疑似断电", "设备发生硬件复位", "系统无响应后自动重启", "系统崩溃后重启",
+        "正常重启", "正常关机", "无法判断上次关机原因",
+    ]
+    for technical_term in ["UNKNOWN", "reset_reason", "strong", "boot_id"]:
+        assert technical_term not in first.locator(".session-head").inner_text()
+    first.locator(":scope > details > summary").click()
+    assert "为什么这样判断" in first.inner_text()
+    assert "硬盘在启动过程中被重新识别" in first.inner_text()
+    assert "判断把握：中" in first.inner_text()
+    assert "为什么不能完全确定" in first.inner_text()
+    assert "设备自身没有记录明确原因" in first.inner_text()
+    first.locator(".technical-evidence > summary").click()
+    page.wait_for_function("document.querySelector('#events .technical-evidence')?.textContent.includes('fixture-boot-id')")
+    assert "boot_id：fixture-boot-id" in first.inner_text()
+    assert "原始事件类型：reset_reason" in first.inner_text()
+    assert "证据等级：strong" in first.inner_text()
+    for label, expected in [("正常", 2), ("可能异常", 4), ("无法判断", 1), ("全部", 7)]:
+        page.locator("#event-tabs").get_by_role("button", name=label, exact=True).click()
+        assert page.locator("#events .session-card").count() == expected
+    page.evaluate("preparePrint()")
+    printed = page.locator("#print-content").inner_text()
+    assert "为什么这样判断" in printed
+    assert "boot_id：fixture-boot-id" in printed
+    assert "原始事件类型：reset_reason" in printed
+    assert "250 2026-09-11 10:00:00 日志 250 TARGET" in printed
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.evaluate("document.documentElement.style.setProperty('--size','20px')")
+    assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
+    assert page.evaluate("document.querySelector('main').getBoundingClientRect().width>=360")
+    page.evaluate("document.documentElement.style.setProperty('--size','14px')")
+    page.set_viewport_size({"width": 1440, "height": 1000})
     # 点击当前行内详情，检查 HDD 与 M.2 的 SMART 证据没有串盘。
     page.locator("#navigation").get_by_role("button", name="硬盘与存储池", exact=True).click()
     assert page.locator(".disk-row").count() == 2

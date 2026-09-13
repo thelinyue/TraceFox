@@ -20,6 +20,29 @@ def click(e,name):
     time.sleep(.4)
 def capture(e,name):e.capture_as_image().save(str(out/name))
 def input_value(e,value):return next(c for c in controls(e,'Edit') if c.get_value()==value)
+def source_query(e):
+    found=[c for c in controls(e,'Edit') if c.window_text()=='日志来源筛选']
+    assert found, [(c.window_text(),c.get_value()) for c in controls(e,'Edit')]
+    return found[0]
+def source_option(e,needle,source_rect):
+    found=[]
+    for window in Desktop(backend='uia').windows(process=e.process_id(),visible_only=True):
+        for kind in ['Button','Text']:
+            for c in window.descendants(control_type=kind):
+                label=c.element_info.name or c.window_text()
+                rect=c.rectangle()
+                if c.is_visible() and needle in label and rect.top>=source_rect.bottom and abs(rect.right-source_rect.right)<=12:
+                    found.append(c)
+    return found[-1] if found else None
+def wait_source_option(e,needle,source_rect):
+    for _ in range(15):
+        found=source_option(e,needle,source_rect)
+        if found is not None: return found
+        time.sleep(.1)
+    return None
+def select_file(e,needle):
+    row=next(c for c in controls(e,'Text') if needle in c.window_text() and '条规则' in c.window_text())
+    rect=row.rectangle();mouse.click(coords=(rect.left+rect.width()//2,rect.top+rect.height()//2));time.sleep(.3)
 def set_value(e,old,new):
     c=input_value(e,old);c.set_focus();c.set_edit_text(new);c.type_keys('{ENTER}');time.sleep(.4)
 def menu(e,name):
@@ -74,10 +97,12 @@ for scale in [1,1.5]:
         open_rule(e,'共享规则');time.sleep(.4)
         assert input_value(e,'pending');click(e,'取消');assert input_value(e,'pending')
         set_value(e,'pending','changed')
-        next(b for b in controls(e,'Button') if b.window_text().startswith('测试内核日志\n')).invoke();time.sleep(.3);assert input_value(e,'changed');assert len([b for b in controls(e,'Button') if b.window_text()=='共享规则'])==1
+        select_file(e,'测试内核日志');assert input_value(e,'changed');assert len([b for b in controls(e,'Button') if b.window_text()=='共享规则'])==1
         c=input_value(e,'changed');c.set_focus();c.set_edit_text('discard');c.type_keys('{ESC}');time.sleep(.3);assert input_value(e,'changed')
         # Drawer text edits go only to its private copy; closing restores the main draft.
-        open_rule(e,'共享规则');assert len([c for c in controls(e,'CheckBox') if c.get_toggle_state()==1])>=2
+        open_rule(e,'共享规则');query=source_query(e);query.set_focus();query.click_input();time.sleep(.3);source_rect=query.rectangle()
+        assert wait_source_option(e,'块设备信息',source_rect) is not None
+        assert wait_source_option(e,'内核启动日志',source_rect) is not None
         assert not any(b.window_text()=='保存全部' for b in controls(e,'Button'))
         # Logical control dimensions and the label gutter must agree at both display scales.
         aligned=[input_value(e,'共享规则'), input_value(e,'changed')]
@@ -106,7 +131,8 @@ for scale in [1,1.5]:
             menu(e,'共享规则');click(e,'复制');click(e,'取消')
             menu(e,'共享规则');click(e,'复制');click(e,'完成')
             scroll(e,-5);menu(e,'共享规则 副本');click(e,'删除');scroll(e,20)
-            click(e,'添加规则到此日志文件');assert any('syslog' in c.window_text() and c.get_toggle_state()==1 for c in controls(e,'CheckBox'))
+            click(e,'添加规则到当前日志文件');query=source_query(e);query.set_focus();query.click_input();time.sleep(.3);source_rect=query.rectangle()
+            assert wait_source_option(e,'块设备信息',source_rect) is not None
             click(e,'下一步');assert any('请填写' in c.window_text() for c in e.descendants(control_type='Text'))
             controls(e,'Edit')[0].set_edit_text('新增测试');click(e,'下一步')
             controls(e,'Edit')[0].set_edit_text('test-term');click(e,'上一步');assert input_value(e,'新增测试')
@@ -124,7 +150,7 @@ for scale in [1,1.5]:
             click(e,'保存全部');saved=json.loads(config.read_text(encoding='utf-8'))
             assert [r['id'] for r in saved['rules'][:2]]==['second','shared'];assert [r['group'] for r in saved['rules'][:2]]==['另一报告分组','网络连接'];assert len(saved['rules'])==3
             click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
-            click(e,'系统信息');click(e,'添加规则到此日志文件')
+            click(e,'系统信息');click(e,'添加规则到当前日志文件')
             controls(e,'Edit')[0].set_edit_text('新系统字段');click(e,'下一步');click(e,'＋ 添加字段')
             edits=controls(e,'Edit');edits[1].set_edit_text('型号');edits[2].set_edit_text('model');capture(e,'uniform-system-fields.png')
             click(e,'下一步');click(e,'完成添加');click(e,'保存全部')

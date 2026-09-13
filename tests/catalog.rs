@@ -27,6 +27,7 @@ fn rules() -> RuleSet {
         }],
         system: vec![],
         layout: Default::default(),
+        timeline: Default::default(),
     }
 }
 fn package(path: &std::path::Path) {

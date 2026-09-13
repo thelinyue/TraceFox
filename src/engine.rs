@@ -3,6 +3,7 @@ use crate::{
     rules::{Matcher, Rule, RuleSet},
 };
 use anyhow::{Context, Result, bail};
+use chrono::{Datelike, FixedOffset, TimeZone, Timelike, Utc};
 use flate2::read::MultiGzDecoder;
 use regex::Regex;
 use serde::Serialize;
@@ -43,6 +44,610 @@ pub struct Event {
     pub key: Option<String>,
     pub note: String,
     pub sources: Vec<Fragment>,
+    /// 结构化事实类型；旧时间线规则未声明时由名称和内容推断。
+    pub event_type: String,
+    pub evidence_strength: String,
+    pub time_precision: String,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct TimelineSession {
+    pub session_id: String,
+    pub boot_time: String,
+    pub boot_time_precision: String,
+    /// 面向报告展示的异常或结束时间；范围用于表达只能从恢复记录和下次启动之间定位的情况。
+    pub incident_time_start: String,
+    pub incident_time_end: Option<String>,
+    pub incident_time_precision: String,
+    pub boot_id: Option<String>,
+    pub facts: Vec<Event>,
+    pub end_classification: String,
+    pub confidence: String,
+    pub supporting_evidence: Vec<String>,
+    pub limitations: Vec<String>,
+}
+
+/// 将旧版自由文本时间线规则映射为稳定的事实事件类型。
+/// 这里只做保守识别，无法确认原因时保留 unknown，避免把关键词误当成故障结论。
+fn classify_timeline_event(name: &str, text: &str) -> String {
+    let s = format!("{} {}", name, text).to_ascii_lowercase();
+    if s.contains("kernel panic")
+        || s.contains("panic - not syncing")
+        || s.contains(" oops:")
+        || s.starts_with("oops:")
+        || s.contains(" call trace:")
+        || s.starts_with("call trace:")
+    {
+        "kernel_panic"
+    } else if s.contains("watchdog") {
+        "watchdog_reset"
+    } else if s.contains("do poweroff proc info")
+        || s.contains("reached target shutdown")
+        || s.contains("systemd-shutdown")
+        || s.contains("powering off")
+        || s.contains("关机流程")
+    {
+        "shutdown_request"
+    } else if s.contains("do reboot proc info")
+        || s.contains("reached target reboot")
+        || s.contains("reboot: restarting system")
+        || s.contains("重启流程")
+    {
+        "reboot_request"
+    } else if s.contains("linux version") {
+        "boot"
+    } else if s.contains("recovery complete") {
+        "filesystem_recovery"
+    } else if s.contains("sata link up") || s.contains("attached scsi") {
+        "device_reenumeration"
+    } else if s.contains("unknown") {
+        "reset_reason"
+    } else {
+        "evidence"
+    }
+    .into()
+}
+
+/// 不依赖用户规则识别少量稳定的 Linux 生命周期事实。这里输出事实，不直接输出故障结论。
+fn automatic_timeline_event(file: &str, line: &str, number: usize) -> Option<Event> {
+    let lower = line.to_ascii_lowercase();
+    let (event_type, name, strength) = if lower.contains("linux version") {
+        ("boot", "系统启动", "strong")
+    } else if lower.contains("kernel panic - not syncing")
+        || lower.contains("panic - not syncing")
+        || lower.contains(" oops:")
+        || lower.starts_with("oops:")
+        || lower.contains(" call trace:")
+        || lower.starts_with("call trace:")
+    {
+        ("kernel_panic", "Kernel Panic / Oops", "strong")
+    } else if (lower.contains("watchdog") && (lower.contains("reset") || lower.contains("reboot")))
+        || lower.contains("hard lockup")
+        || lower.contains("soft lockup")
+    {
+        ("watchdog_reset", "Watchdog 复位", "strong")
+    } else if lower.contains("reached target shutdown")
+        || lower.contains("systemd-shutdown")
+        || lower.contains("powering off")
+        || lower.contains("do poweroff proc info")
+    {
+        ("shutdown_request", "系统关机流程", "strong")
+    } else if lower.contains("reached target reboot")
+        || lower.contains("reboot: restarting system")
+        || lower.contains("systemd reboot")
+    {
+        ("reboot_request", "系统重启流程", "strong")
+    } else if lower.contains("recovery complete")
+        || lower.contains("recovering journal")
+        || lower.contains("ext4-fs") && lower.contains("recovery")
+    {
+        ("filesystem_recovery", "文件系统恢复", "medium")
+    } else if lower.contains("sata link up")
+        || lower.contains("attached scsi disk")
+        || lower.contains("ata[0-9].*link up")
+    {
+        ("device_reenumeration", "存储设备重新枚举", "medium")
+    } else if (lower.contains(" md") || lower.contains("raid"))
+        && (lower.contains("assemble") || lower.contains("started") || lower.contains("recovery"))
+    {
+        ("device_reenumeration", "RAID 阵列重新组装", "medium")
+    } else {
+        return None;
+    };
+    let (time, key) = event_time_prepared(line, &Rule::default(), None);
+    let time_precision = if key.is_some() { "exact" } else { "partial" };
+    Some(Event {
+        name: name.into(),
+        group: "系统时间线事实".into(),
+        time,
+        key,
+        note: "由通用 Linux 日志结构识别，需结合其他事实推断会话结束原因".into(),
+        sources: vec![Fragment {
+            file: file.into(),
+            lines: vec![LogLine {
+                number,
+                text: line.into(),
+                hit: true,
+                ranges: vec![],
+            }],
+            time: String::new(),
+            annotation: "自动识别的日志事实".into(),
+        }],
+        event_type: event_type.into(),
+        evidence_strength: strength.into(),
+        time_precision: time_precision.into(),
+    })
+}
+
+/// 解析 UGOS 的 pstore 复位原因块。该文件不是普通逐行关键词日志，必须按块保留 boot_id 与原因字段。
+fn parse_reset_reason_blocks(name: &str, text: &str) -> Vec<Event> {
+    let mut events = Vec::new();
+    let mut block = Vec::new();
+    let flush = |block: &mut Vec<(usize, String)>, events: &mut Vec<Event>| {
+        if block.is_empty() {
+            return;
+        }
+        let joined = block
+            .iter()
+            .map(|(_, line)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let boot_id = block
+            .iter()
+            .find_map(|(_, line)| line.strip_prefix("# boot_id:").map(str::trim));
+        let boot_time = block.iter().find_map(|(_, line)| {
+            line.strip_prefix("  Boot Time")
+                .and_then(|v| v.split_once(' ').map(|(_, value)| value.trim()))
+        });
+        let cause = block
+            .iter()
+            .find_map(|(_, line)| line.strip_prefix("│ REBOOT CAUSE:").map(str::trim));
+        let reason = block.iter().find_map(|(_, line)| {
+            line.strip_prefix("  Reason")
+                .and_then(|v| v.split_once(' ').map(|(_, value)| value.trim()))
+        });
+        let source = block.iter().find_map(|(_, line)| {
+            line.strip_prefix("  Source")
+                .and_then(|v| v.split_once(' ').map(|(_, value)| value.trim()))
+        });
+        let sw = block.iter().find_map(|(_, line)| {
+            line.strip_prefix("  SW")
+                .and_then(|v| v.split_once(' ').map(|(_, value)| value.trim()))
+        });
+        let hw = block.iter().find_map(|(_, line)| {
+            line.strip_prefix("  HW")
+                .and_then(|v| v.split_once(' ').map(|(_, value)| value.trim()))
+        });
+        let Some(cause) = cause.or(reason) else {
+            block.clear();
+            return;
+        };
+        let time = boot_time.unwrap_or("时间未识别").to_string();
+        let key = parse_vendor_boot_key(boot_time);
+        let event_type = if cause.contains("Kernel Panic")
+            || reason.is_some_and(|r| r.eq_ignore_ascii_case("kernel_panic"))
+        {
+            "kernel_panic"
+        } else if cause.contains("NORMAL — Shutdown")
+            || reason.is_some_and(|r| r.eq_ignore_ascii_case("poweroff"))
+        {
+            "shutdown_complete"
+        } else if cause.contains("NORMAL — Reboot")
+            || reason.is_some_and(|r| r.eq_ignore_ascii_case("normal_reboot"))
+        {
+            "reboot_complete"
+        } else if cause.contains("POWER")
+            || cause.contains("Power")
+            || reason.is_some_and(|r| r.eq_ignore_ascii_case("power_loss"))
+        {
+            "power_loss_hint"
+        } else if cause.to_ascii_lowercase().contains("watchdog")
+            || reason.is_some_and(|r| r.eq_ignore_ascii_case("watchdog"))
+        {
+            "watchdog_reset"
+        } else if cause.to_ascii_lowercase().contains("hardware")
+            || reason.is_some_and(|r| r.eq_ignore_ascii_case("hardware_reset"))
+        {
+            "hardware_reset"
+        } else {
+            "reset_reason"
+        };
+        let strength = if event_type == "reset_reason" {
+            "high"
+        } else {
+            "strong"
+        };
+        let source_line = block.first().map(|(line, _)| *line).unwrap_or(1);
+        events.push(Event {
+            name: format!("厂商复位原因：{}", cause),
+            group: "系统事件".into(),
+            time,
+            key,
+            note: format!(
+                "boot_id：{}；原始复位原因：{}；Source：{}；SW：{}；HW：{}",
+                boot_id.unwrap_or("未提供"),
+                cause,
+                source.unwrap_or("未提供"),
+                sw.unwrap_or("未提供"),
+                hw.unwrap_or("未提供")
+            ),
+            sources: vec![Fragment {
+                file: name.to_string(),
+                lines: vec![LogLine {
+                    number: source_line,
+                    text: joined,
+                    hit: true,
+                    ranges: vec![],
+                }],
+                time: boot_time.unwrap_or("时间未识别").to_string(),
+                annotation: "pstore 结构化复位原因块".into(),
+            }],
+            event_type: event_type.into(),
+            evidence_strength: strength.into(),
+            time_precision: if boot_time.is_some() {
+                "exact"
+            } else {
+                "unknown"
+            }
+            .into(),
+        });
+        block.clear();
+    };
+    for (index, line) in text.lines().enumerate() {
+        if line.contains("# BEGIN ug_reset_reason") {
+            block.clear();
+        }
+        if !block.is_empty() || line.contains("# BEGIN ug_reset_reason") {
+            block.push((index + 1, line.to_string()));
+        }
+        if line.contains("# END ug_reset_reason") {
+            flush(&mut block, &mut events);
+        }
+    }
+    flush(&mut block, &mut events);
+    events
+}
+
+/// 按启动事实建立可审计的启动会话；结论只使用明确事实，未知原因不会升级为断电。
+fn build_timeline_sessions(events: &[Event], match_window_seconds: i64) -> Vec<TimelineSession> {
+    let mut ordered = events.to_vec();
+    ordered.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.time.cmp(&b.time)));
+    let mut sessions = Vec::new();
+    let boot_candidates = ordered
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| (e.event_type == "boot").then_some(i))
+        .collect::<Vec<_>>();
+    let exact_boot_candidates = boot_candidates
+        .iter()
+        .copied()
+        .filter(|&i| ordered[i].key.is_some())
+        .collect::<Vec<_>>();
+    let mut boot_positions = if boot_candidates.is_empty() {
+        ordered
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                e.sources
+                    .iter()
+                    .any(|s| s.annotation == "pstore 结构化复位原因块")
+                    .then_some(i)
+            })
+            .collect::<Vec<_>>()
+    } else if exact_boot_candidates.is_empty() {
+        boot_candidates
+    } else {
+        exact_boot_candidates
+    };
+    // 同一启动可能同时命中“Linux version”和“NUL 前 Linux version”规则，只保留一个启动锚点。
+    let mut unique_boots: Vec<usize> = Vec::new();
+    for position in boot_positions.drain(..) {
+        let duplicate = unique_boots.iter().any(|&prior| {
+            ordered[prior].key.is_some() && ordered[prior].key == ordered[position].key
+        });
+        if !duplicate {
+            unique_boots.push(position);
+        }
+    }
+    let boot_positions = unique_boots;
+    for (idx, &position) in boot_positions.iter().enumerate() {
+        let event = &ordered[position];
+        let next_boot = boot_positions.get(idx + 1).map(|&next| &ordered[next]);
+        let mut facts = ordered
+            .iter()
+            .filter(|candidate| event_belongs_to_session(candidate, event, next_boot))
+            .take(128)
+            .cloned()
+            .collect::<Vec<_>>();
+        // pstore 原因通常与 Linux version 同一启动时间，但文件行序可能排在启动事实之前；
+        // 按五分钟窗口补入同一会话，避免重复会话或丢失厂商原因。
+        let extra_vendor_facts = ordered
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .sources
+                    .iter()
+                    .any(|s| s.annotation == "pstore 结构化复位原因块")
+                    && !facts
+                        .iter()
+                        .any(|fact| fact.name == candidate.name && fact.time == candidate.time)
+                    && candidate.key.as_deref() >= event.key.as_deref()
+                    && same_time_window(&event.key, &candidate.key, match_window_seconds)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        facts.extend(extra_vendor_facts);
+        facts.sort_by(|a, b| a.key.cmp(&b.key).then_with(|| a.time.cmp(&b.time)));
+        let has_panic = facts.iter().any(|e| e.event_type == "kernel_panic");
+        let has_watchdog = facts.iter().any(|e| e.event_type == "watchdog_reset");
+        let has_hardware_reset = facts.iter().any(|e| e.event_type == "hardware_reset");
+        let has_shutdown = facts.iter().any(|e| e.event_type == "shutdown_request");
+        let has_reboot = facts.iter().any(|e| e.event_type == "reboot_request");
+        let vendor_shutdown = facts.iter().any(|e| e.event_type == "shutdown_complete");
+        let vendor_reboot = facts.iter().any(|e| e.event_type == "reboot_complete");
+        let (classification, confidence, evidence) = if has_panic {
+            (
+                "Kernel Panic 重启",
+                "高",
+                vec!["发现系统内核崩溃记录".into()],
+            )
+        } else if has_watchdog {
+            (
+                "Watchdog 重启",
+                "高",
+                vec!["系统在无响应后触发了自动复位".into()],
+            )
+        } else if has_hardware_reset {
+            ("硬件复位", "高", vec!["设备记录到硬件复位".into()])
+        } else if has_reboot || vendor_reboot {
+            ("正常重启", "高", vec!["找到完整的正常重启记录".into()])
+        } else if has_shutdown || vendor_shutdown {
+            ("正常关机", "高", vec!["找到正常关机流程记录".into()])
+        } else if facts.iter().any(|e| {
+            e.event_type == "filesystem_recovery" || e.event_type == "device_reenumeration"
+        }) {
+            let mut evidence = Vec::new();
+            if facts.iter().any(|e| e.event_type == "device_reenumeration") {
+                evidence.push("硬盘在启动过程中被重新识别".into());
+            }
+            if facts.iter().any(|e| e.event_type == "filesystem_recovery") {
+                evidence.push("文件系统执行过异常中断恢复".into());
+            }
+            if !has_shutdown && !has_reboot && !vendor_shutdown && !vendor_reboot {
+                evidence.push("没有找到正常关机或重启记录".into());
+            }
+            ("疑似断电", "中", evidence)
+        } else {
+            (
+                "未知复位",
+                "低",
+                vec!["没有足够记录判断上次关机原因".into()],
+            )
+        };
+        let (incident_time_start, incident_time_end, incident_time_precision) =
+            session_incident_time(
+                classification,
+                &facts,
+                event,
+                next_boot,
+                match_window_seconds,
+            );
+        let boot_id = facts.iter().find_map(extract_boot_id);
+        let mut limitations = Vec::new();
+        if facts.iter().any(|fact| fact.event_type == "reset_reason") {
+            limitations.push("设备自身没有记录明确原因".into());
+        }
+        if classification == "疑似断电" {
+            limitations.push("没有直接的电源状态记录".into());
+        }
+        if event.key.is_none() || facts.iter().any(|fact| fact.time_precision == "partial") {
+            limitations.push("部分日志时间可能存在少量偏差".into());
+        }
+        sessions.push(TimelineSession {
+            session_id: format!("session-{}", idx + 1),
+            boot_time: event.time.clone(),
+            boot_time_precision: event.time_precision.clone(),
+            incident_time_start,
+            incident_time_end,
+            incident_time_precision,
+            boot_id,
+            facts,
+            end_classification: classification.into(),
+            confidence: confidence.into(),
+            supporting_evidence: evidence,
+            limitations,
+        });
+    }
+    sessions
+}
+
+/// 将内部会话边界转换为报告使用的异常时间。疑似断电没有直接时刻，显示恢复证据到下次启动的范围。
+fn session_incident_time(
+    classification: &str,
+    facts: &[Event],
+    current_boot: &Event,
+    next_boot: Option<&Event>,
+    match_window_seconds: i64,
+) -> (String, Option<String>, String) {
+    if classification == "疑似断电" {
+        if let Some(next) = next_boot {
+            let mut candidates = facts
+                .iter()
+                .filter(|fact| {
+                    matches!(
+                        fact.event_type.as_str(),
+                        "filesystem_recovery" | "device_reenumeration" | "power_loss_hint"
+                    ) && seconds_before(fact, next)
+                        .is_some_and(|seconds| seconds <= match_window_seconds)
+                })
+                .collect::<Vec<_>>();
+            candidates.sort_by_key(|fact| local_clock_value(&fact.time));
+            let start = candidates
+                .first()
+                .map(|fact| fact.time.clone())
+                .unwrap_or_else(|| next.time.clone());
+            return (start, Some(next.time.clone()), "range".into());
+        }
+    }
+    let decisive_types: &[&str] = match classification {
+        "正常关机" => &["shutdown_complete", "shutdown_request"],
+        "正常重启" => &["reboot_complete", "reboot_request"],
+        "Kernel Panic 重启" => &["kernel_panic"],
+        "Watchdog 重启" => &["watchdog_reset"],
+        "硬件复位" => &["hardware_reset"],
+        _ => &[],
+    };
+    if let Some(fact) = facts
+        .iter()
+        .filter(|fact| decisive_types.contains(&fact.event_type.as_str()))
+        .max_by_key(|fact| local_clock_value(&fact.time))
+    {
+        return (
+            fact.time.clone(),
+            None,
+            if fact.key.is_some() {
+                "exact"
+            } else {
+                "approximate"
+            }
+            .into(),
+        );
+    }
+    let time = next_boot.unwrap_or(current_boot).time.clone();
+    (time, None, "unknown".into())
+}
+
+fn seconds_before(event: &Event, next_boot: &Event) -> Option<i64> {
+    if let (Some(event), Some(next)) = (event.key.as_deref(), next_boot.key.as_deref()) {
+        let event = chrono::DateTime::parse_from_rfc3339(event).ok()?;
+        let next = chrono::DateTime::parse_from_rfc3339(next).ok()?;
+        let seconds = next.timestamp() - event.timestamp();
+        return (seconds >= 0).then_some(seconds);
+    }
+    let (event_month, event_day, event_seconds) = local_clock_value(&event.time)?;
+    let (next_month, next_day, next_seconds) = local_clock_value(&next_boot.time)?;
+    if (event_month, event_day) != (next_month, next_day) || event_seconds > next_seconds {
+        return None;
+    }
+    Some((next_seconds - event_seconds) as i64)
+}
+
+fn local_clock_value(value: &str) -> Option<(u32, u32, u32)> {
+    if let Ok(time) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Some((
+            time.month(),
+            time.day(),
+            time.time().num_seconds_from_midnight(),
+        ));
+    }
+    let raw = value.get(..19).unwrap_or(value);
+    if let Ok(time) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+        return Some((
+            time.month(),
+            time.day(),
+            time.time().num_seconds_from_midnight(),
+        ));
+    }
+    partial_clock(value)
+}
+
+fn parse_vendor_boot_key(boot_time: Option<&str>) -> Option<String> {
+    let value = boot_time?.get(..19)?;
+    let naive = chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S").ok()?;
+    if boot_time.is_some_and(|time| time.contains("CST")) {
+        FixedOffset::east_opt(8 * 60 * 60)
+            .and_then(|offset| offset.from_local_datetime(&naive).single())
+            .map(|time| {
+                time.with_timezone(&Utc)
+                    .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
+            })
+    } else {
+        Some(
+            naive
+                .and_utc()
+                .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+        )
+    }
+}
+
+fn event_belongs_to_session(event: &Event, current: &Event, next: Option<&Event>) -> bool {
+    let Some(current_key) = current.key.as_deref() else {
+        return true;
+    };
+    if let Some(key) = event.key.as_deref() {
+        return key >= current_key
+            && next
+                .and_then(|end| end.key.as_deref())
+                .map_or(true, |end| key < end);
+    }
+    let Some(next) = next else {
+        return false;
+    };
+    let (Ok(current), Ok(next)) = (
+        chrono::DateTime::parse_from_rfc3339(&current.time),
+        chrono::DateTime::parse_from_rfc3339(&next.time),
+    ) else {
+        return false;
+    };
+    let Some((month, day, seconds)) = partial_clock(&event.time) else {
+        return false;
+    };
+    if month != current.month() || day != current.day() || current.date_naive() != next.date_naive()
+    {
+        return false;
+    }
+    let start = current.time().num_seconds_from_midnight();
+    let end = next.time().num_seconds_from_midnight();
+    seconds >= start && seconds < end
+}
+
+fn partial_clock(value: &str) -> Option<(u32, u32, u32)> {
+    let raw = value.split('（').next()?.trim();
+    let mut parts = raw.split_whitespace();
+    let month = match parts.next()? {
+        "Jan" => 1,
+        "Feb" => 2,
+        "Mar" => 3,
+        "Apr" => 4,
+        "May" => 5,
+        "Jun" => 6,
+        "Jul" => 7,
+        "Aug" => 8,
+        "Sep" => 9,
+        "Oct" => 10,
+        "Nov" => 11,
+        "Dec" => 12,
+        _ => return None,
+    };
+    let day = parts.next()?.parse().ok()?;
+    let time = parts.next()?;
+    let mut clock = time.split(':');
+    let hour: u32 = clock.next()?.parse().ok()?;
+    let minute: u32 = clock.next()?.parse().ok()?;
+    let second: u32 = clock.next()?.parse().ok()?;
+    Some((month, day, hour * 3600 + minute * 60 + second))
+}
+
+fn same_time_window(a: &Option<String>, b: &Option<String>, seconds: i64) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return false;
+    };
+    let (Ok(a), Ok(b)) = (
+        chrono::DateTime::parse_from_rfc3339(a),
+        chrono::DateTime::parse_from_rfc3339(b),
+    ) else {
+        return a == b;
+    };
+    (a.timestamp() - b.timestamp()).abs() <= seconds
+}
+
+fn extract_boot_id(event: &Event) -> Option<String> {
+    event
+        .note
+        .split_once("boot_id：")
+        .and_then(|(_, value)| value.split('；').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "未提供")
+        .map(ToOwned::to_owned)
 }
 #[derive(Serialize)]
 pub struct Report {
@@ -57,6 +662,10 @@ pub struct Report {
     pub system: Vec<Table>,
     pub findings: Vec<Finding>,
     pub events: Vec<Event>,
+    /// 事实事件的稳定输出名称；events 保留旧报告兼容，两个字段内容一致。
+    pub timeline_facts: Vec<Event>,
+    pub timeline_sessions: Vec<TimelineSession>,
+    pub timeline_warnings: Vec<String>,
     pub warnings: Vec<String>,
 }
 /// 报告每条规则只内嵌前 500 个命中（沿用报告排序），扫描和总数保持完整。
@@ -493,7 +1102,8 @@ impl AnalysisFilePlan {
                 sys_by_file[file].push(i);
             }
         }
-        let files = sys_by_file
+        let archive_files = files;
+        let files: Vec<PlannedFile> = sys_by_file
             .into_iter()
             .zip(active_by_file)
             .enumerate()
@@ -505,8 +1115,35 @@ impl AnalysisFilePlan {
                 })
             })
             .collect();
-        Ok(Self { files })
+        let mut plans = files;
+        // pstore 复位原因是结构化事实来源，即使用户没有创建对应关键词规则也必须进入分析计划。
+        for (file_index, (name, _)) in archive_files.iter().enumerate() {
+            if (name
+                .replace('\\', "/")
+                .ends_with("/pstore/ug_reset_reason.log")
+                || is_likely_timeline_source(name))
+                && !plans.iter().any(|p| p.file_index == file_index)
+            {
+                plans.push(PlannedFile {
+                    file_index,
+                    system: vec![],
+                    active: vec![],
+                });
+            }
+        }
+        Ok(Self { files: plans })
     }
+}
+
+fn is_likely_timeline_source(name: &str) -> bool {
+    let path = name.replace('\\', "/").to_ascii_lowercase();
+    let base = path.rsplit('/').next().unwrap_or(&path);
+    base.starts_with("dmesg")
+        || (base.starts_with("kern") && (base.ends_with(".log") || !base.contains('.')))
+        || base.starts_with("syslog")
+        || base.starts_with("journal")
+        || base.starts_with("messages")
+        || path.contains("/pstore/")
 }
 
 /// 结构化提取需要完整文本时，保留原始字节供日志扫描复用。
@@ -585,6 +1222,29 @@ fn analyze_file(
         findings: template.to_vec(),
         ..Default::default()
     };
+    // 已配置的时间线规则负责该日志时，保留旧规则的事件数量和合并语义；
+    // 没有时间线规则覆盖的日志才启用通用事实识别，避免重复展示。
+    let has_configured_timeline = template.iter().any(|finding| {
+        finding.rule.target != "keywords"
+            && finding
+                .rule
+                .sources
+                .iter()
+                .any(|source| source.matches(name))
+    });
+    if name
+        .replace('\\', "/")
+        .ends_with("/pstore/ug_reset_reason.log")
+    {
+        match CapturedSource::read(p, cancel)
+            .and_then(|captured| captured.text().map(str::to_owned))
+        {
+            Ok(text) => report.events.extend(parse_reset_reason_blocks(name, &text)),
+            Err(error) => report
+                .warnings
+                .push(format!("无法解析 pstore 复位原因 {name}：{error}")),
+        }
+    }
     let captured = if sys.is_empty() {
         None
     } else {
@@ -622,9 +1282,6 @@ fn analyze_file(
                 Err(e) => report.warnings.push(format!("{} / {}：{e}", s.name, name)),
             }
         }
-    }
-    if active.is_empty() {
-        return Ok(report);
     }
     let max_before = active
         .iter()
@@ -666,6 +1323,11 @@ fn analyze_file(
             noted_nul = true;
         }
         let line = display_line(&bytes);
+        if !has_configured_timeline {
+            if let Some(event) = automatic_timeline_event(name, &line, line_number) {
+                report.events.push(event);
+            }
+        }
         let compact = std::cell::OnceCell::new();
         for &i in active {
             let r = &report.findings[i].rule;
@@ -695,7 +1357,7 @@ fn analyze_file(
                         name: r.name.clone(),
                         group: r.group.clone(),
                         time: time.clone(),
-                        key,
+                        key: key.clone(),
                         note: r.note.clone(),
                         sources: vec![Fragment {
                             file: name.clone(),
@@ -708,6 +1370,9 @@ fn analyze_file(
                             time: time.clone(),
                             annotation: String::new(),
                         }],
+                        event_type: classify_timeline_event(&r.name, &line),
+                        evidence_strength: "medium".into(),
+                        time_precision: if key.is_some() { "exact" } else { "partial" }.into(),
                     });
                 }
                 if let Some((fragment, end)) = pending[i].as_mut() {
@@ -842,6 +1507,9 @@ pub fn analyze_with_workers(
             })
             .collect(),
         events: vec![],
+        timeline_facts: vec![],
+        timeline_sessions: vec![],
+        timeline_warnings: vec![],
         warnings: vec![],
     };
     let matchers: Vec<_> = report
@@ -1103,6 +1771,31 @@ pub fn analyze_with_workers(
         _ => a.time.cmp(&b.time),
     });
     report.events = merged;
+    report.timeline_facts = report.events.clone();
+    report.timeline_sessions = build_timeline_sessions(
+        &report.events,
+        rules.timeline.thresholds.match_window_seconds as i64,
+    );
+    if rules.layout.timeline_sort == "desc" {
+        report.timeline_sessions.reverse();
+    }
+    if !report.events.iter().any(|event| {
+        event.sources.iter().any(|source| {
+            source
+                .file
+                .replace('\\', "/")
+                .ends_with("/pstore/ug_reset_reason.log")
+        })
+    }) {
+        report.timeline_warnings.push(
+            "未发现 ug_reset_reason.log；厂商复位原因不可用，未知复位不会被自动判定为断电。".into(),
+        );
+    }
+    if report.events.iter().any(|e| e.time_precision == "partial") {
+        report
+            .timeline_warnings
+            .push("部分时间只有局部时间或无法统一到绝对时间，跨日志来源未强行合并。".into());
+    }
     for finding in &mut report.findings {
         limit_report_evidence(finding);
     }
@@ -1255,6 +1948,9 @@ pub fn preview(rules: &RuleSet, index: usize, system: bool, text: &str) -> Resul
         system: vec![],
         findings: vec![],
         events: vec![],
+        timeline_facts: vec![],
+        timeline_sessions: vec![],
+        timeline_warnings: vec![],
         warnings: vec![],
     };
     let preview_ids = if system {
@@ -1326,9 +2022,12 @@ pub fn preview(rules: &RuleSet, index: usize, system: bool, text: &str) -> Resul
                     name: r.name.clone(),
                     group: r.group.clone(),
                     time,
-                    key,
+                    key: key.clone(),
                     note: r.note.clone(),
                     sources: vec![f],
+                    event_type: classify_timeline_event(&r.name, &line),
+                    evidence_strength: "medium".into(),
+                    time_precision: if key.is_some() { "exact" } else { "partial" }.into(),
                 });
             }
         }
@@ -1336,6 +2035,14 @@ pub fn preview(rules: &RuleSet, index: usize, system: bool, text: &str) -> Resul
             finding.status = "已匹配".into();
         }
         report.findings.push(finding);
+    }
+    report.timeline_facts = report.events.clone();
+    report.timeline_sessions = build_timeline_sessions(
+        &report.events,
+        rules.timeline.thresholds.match_window_seconds as i64,
+    );
+    if rules.layout.timeline_sort == "desc" {
+        report.timeline_sessions.reverse();
     }
     let json = serde_json::to_string(&report)?
         .replace('&', "\\u0026")
@@ -1387,6 +2094,73 @@ mod tests {
             ..r
         };
         assert!(event_time("2026-09-09 08:00:00", &r).1.is_some());
+    }
+    #[test]
+    fn parses_vendor_reset_reason_blocks_without_overclaiming_unknown() {
+        let text = "# BEGIN ug_reset_reason\n# boot_id: abc\n  Boot Time  2026-09-08 08:53:26 CST\n│ REBOOT CAUSE: UNKNOWN — Insufficient Data                  │\n  Reason     unknown\n# END ug_reset_reason\n# BEGIN ug_reset_reason\n# boot_id: def\n  Boot Time  2026-09-08 08:23:08 CST\n│ REBOOT CAUSE: NORMAL — Shutdown                            │\n  Reason     poweroff\n# END ug_reset_reason";
+        let events = parse_reset_reason_blocks("pstore/ug_reset_reason.log", text);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, "reset_reason");
+        assert_eq!(events[1].event_type, "shutdown_complete");
+        assert_eq!(events[0].evidence_strength, "high");
+        assert!(events[0].key.is_some());
+    }
+    #[test]
+    fn automatic_facts_cover_boot_recovery_and_do_not_call_unknown_power_loss() {
+        let boot = automatic_timeline_event(
+            "var/log/kern.log",
+            "2026-09-08T08:50:00+08:00 Linux version 6.1.0",
+            1,
+        )
+        .unwrap();
+        let recovery = automatic_timeline_event(
+            "var/log/kern.log",
+            "2026-09-08T08:51:13+08:00 EXT4-fs: recovery complete",
+            2,
+        )
+        .unwrap();
+        let next_boot = automatic_timeline_event(
+            "var/log/kern.log",
+            "2026-09-08T08:53:26+08:00 Linux version 6.1.0",
+            3,
+        )
+        .unwrap();
+        assert_eq!(boot.event_type, "boot");
+        assert_eq!(recovery.event_type, "filesystem_recovery");
+        let sessions = build_timeline_sessions(&[boot, recovery, next_boot], 300);
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].end_classification, "疑似断电");
+        assert_ne!(sessions[0].end_classification, "断电");
+        assert_eq!(sessions[0].incident_time_start, "2026-09-08T08:51:13+08:00");
+        assert_eq!(
+            sessions[0].incident_time_end.as_deref(),
+            Some("2026-09-08T08:53:26+08:00")
+        );
+        assert_eq!(sessions[0].incident_time_precision, "range");
+        assert!(
+            sessions[0]
+                .supporting_evidence
+                .contains(&"文件系统执行过异常中断恢复".to_string())
+        );
+    }
+    #[test]
+    fn vendor_boot_id_is_kept_on_session_when_time_matches_boot() {
+        let mut boot = automatic_timeline_event(
+            "var/log/kern.log",
+            "2026-09-08T08:53:26+08:00 Linux version 6.1.0",
+            1,
+        )
+        .unwrap();
+        let vendor = parse_reset_reason_blocks(
+            "pstore/ug_reset_reason.log",
+            "# BEGIN ug_reset_reason\n# boot_id: abc\n  Boot Time  2026-09-08 08:53:26 CST\n│ REBOOT CAUSE: UNKNOWN — Insufficient Data │\n  Reason unknown\n# END ug_reset_reason",
+        )
+        .pop()
+        .unwrap();
+        boot.key = Some("2026-09-08T00:53:26Z".into());
+        let sessions = build_timeline_sessions(&[boot, vendor], 300);
+        assert_eq!(sessions[0].boot_id.as_deref(), Some("abc"));
+        assert_eq!(sessions[0].end_classification, "未知复位");
     }
     #[test]
     fn linear_lsblk_is_reported_as_jbod_without_rewriting_rows() {

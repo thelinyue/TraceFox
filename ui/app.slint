@@ -242,7 +242,7 @@ component SourcePicker inherits Rectangle {
         }
         Rectangle {min-width:120px;horizontal-stretch:1;
             Text {visible:root.query=="";text:"输入日志名称或路径进行筛选";color:#8b96a8;vertical-alignment:center;horizontal-alignment:left;x:8px;width:max(0px,parent.width - 8px);}
-            query-input := TextInput {width:parent.width;height:parent.height;text <=> root.query;color:#263247;font-size:14px;text-cursor-width:1px;vertical-alignment:center;
+            query-input := TextInput {width:parent.width;height:parent.height;text <=> root.query;color:#263247;font-size:14px;text-cursor-width:1px;vertical-alignment:center;accessible-label:"日志来源筛选";
                 edited=>{root.open=true;root.search();source-menu.show();}
                 changed has-focus=>{if self.has-focus {root.open=true;root.search();source-menu.show();}}
                 key-pressed(event)=>{if event.text==Key.Backspace && root.query=="" && root.selected-options.length>0 {root.remove-last();return accept;}return reject;}
@@ -254,6 +254,8 @@ component SourcePicker inherits Rectangle {
         Rectangle {background:#fff;border-width:1px;border-color:#dfe4eb;border-radius:4px;drop-shadow-blur:18px;drop-shadow-color:#1b2b451c;drop-shadow-offset-y:5px;
         ScrollView {VerticalBox {padding:8px;spacing:2px;alignment:start;
             for option in root.options: Rectangle {height:40px;background:option.chosen ? #f1f6ff : #fff;
+                accessible-role:button;accessible-label:option.label;accessible-enabled:true;
+                accessible-action-default=>{root.choose(option.id,!option.chosen);root.open=false;source-menu.close();}
                 Text {x:10px;width:max(0px,parent.width - 20px);text:option.label;color:#263247;vertical-alignment:center;overflow:elide;}
                 TouchArea{mouse-cursor:pointer;clicked=>{root.choose(option.id,!option.chosen);root.open=false;source-menu.close();}}
             }
@@ -435,10 +437,12 @@ export component EditorWindow inherits Window {
     in-out property <int> file-drag-from: -1;
     in-out property <bool> file-dragging;
     in-out property <length> file-drag-y;
-    callback drop-file(int, int);
+    in-out property <int> file-drop-target: -1;
+    callback drop-file(int, int); callback file-drag-hover(float);
     callback focus-dialog(); callback focus-list();
     focus-dialog => { modal.focus(); }
     in-out property <int> focus-generation;
+    in-out property <int> rule-name-focus-generation;
     focus-list => { list-focus.focus(); root.focus-generation += 1; }
     changed title-text => {if root.section==3 {root.dirty=true;}}
     changed system-title => {if root.section==3 {root.dirty=true;}}
@@ -492,30 +496,21 @@ export component EditorWindow inherits Window {
                         ScrollView {x:0px;y:40px;width:parent.width;height:max(0px,parent.height - 40px);VerticalBox {padding:0;spacing:4px;alignment:start;
                             for file[i] in root.file-titles: Rectangle {
                                 height:58px;vertical-stretch:0;
-                                Rectangle {x:24px;width:parent.width - 24px;height:parent.height;background:i==root.file-index ? #e8f1ff : #ffffff;border-radius:8px;border-width:1px;border-color:i==root.file-index ? #b8d0f2 : #e5eaf1;
+                                Rectangle {x:24px;width:parent.width - 24px;height:parent.height;background:i==root.file-index ? #e8f1ff : (root.file-dragging && i==root.file-drop-target ? #edf5ff : #ffffff);border-radius:8px;border-width:1px;border-color:i==root.file-index ? #b8d0f2 : (root.file-dragging && i==root.file-drop-target ? #2468d8 : #e5eaf1);
                                     Text {x:12px;width:parent.width - 24px;height:parent.height;text:file;vertical-alignment:center;overflow:elide;color:#263247;}
                                 }
-                                // 拖动手柄离开起始行后，由各行的投放区接收释放事件，避免只能在原行内释放。
-                                // 整行捕获拖拽，避免指针离开左侧手柄后 TouchArea 丢失事件。
+                                // 起始行捕获整个拖动过程；用列表内容坐标计算目标，避免指针跨行后丢失释放事件。
                                 TouchArea {x:0px;width:parent.width;height:parent.height;enabled:!root.dialog-open;mouse-cursor:grab;
                                     pointer-event(event)=>{
-                                        if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.file-drag-from=i;root.file-dragging=false;root.file-drag-y=self.mouse-y;}
-                                        if event.kind==PointerEventKind.up && root.file-drag-from>=0 {
-                                            if root.file-dragging {root.drop-file(root.file-drag-from,i);}
-                                            else {root.select-file(i);}
-                                            root.file-drag-from=-1;root.file-dragging=false;
+                                        if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.file-drag-from=i;root.file-dragging=false;root.file-drop-target=i;root.file-drag-y=i*62px+self.mouse-y;}
+                                        if event.kind==PointerEventKind.up && root.file-drag-from==i {
+                                            if root.file-dragging && root.file-drop-target>=0 {root.drop-file(root.file-drag-from,root.file-drop-target);}
+                                            else if !root.file-dragging {root.select-file(i);}
+                                            root.file-drag-from=-1;root.file-dragging=false;root.file-drop-target=-1;
                                         }
-                                        if event.kind==PointerEventKind.cancel {root.file-drag-from=-1;root.file-dragging=false;}
+                                        if event.kind==PointerEventKind.cancel {root.file-drag-from=-1;root.file-dragging=false;root.file-drop-target=-1;}
                                     }
-                                    moved=>{if root.file-drag-from==i {root.file-dragging=true;}}
-                                }
-                                TouchArea {x:0px;width:0px;height:0px;enabled:false;mouse-cursor:grab;
-                                    pointer-event(event)=>{
-                                        if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.file-drag-from=i;root.file-dragging=false;root.file-drag-y=self.mouse-y;}
-                                        if event.kind==PointerEventKind.up && root.file-drag-from==i && !root.file-dragging {root.file-drag-from=-1;}
-                                        if event.kind==PointerEventKind.cancel {root.file-drag-from=-1;root.file-dragging=false;}
-                                    }
-                                    moved=>{if self.pressed && root.file-drag-from==i {if abs(self.mouse-y - self.pressed-y) > 8px {root.file-dragging=true;}}}
+                                    moved=>{if self.pressed && root.file-drag-from==i {root.file-drag-y=i*62px+self.mouse-y;if abs(self.mouse-y - self.pressed-y) > 8px {root.file-dragging=true;}if root.file-dragging {root.file-drag-hover(root.file-drag-y/1px);}}}
                                 }
                                 Text{x:6px;width:16px;height:parent.height;text:"⠿";color:#8994a4;vertical-alignment:center;horizontal-alignment:center;}
                             }
@@ -698,9 +693,9 @@ export component EditorWindow inherits Window {
                     if !root.wizard || root.step==0: VerticalBox { padding:0;alignment:start;vertical-stretch:0;spacing:10px;
                         if root.wizard: Text{text:"你想从哪些文件中提取内容？";font-size:16px;font-weight:600;vertical-stretch:0;}
                         Text{text:"基本信息";font-size:16px;font-weight:600;vertical-stretch:0;}
-                        HorizontalBox {padding:0;vertical-stretch:0;height:32px;
+                        HorizontalBox {padding:0;vertical-stretch:0;height:32px;property <int> focus-generation:root.rule-name-focus-generation;
                             spacing:EditorMetrics.field-gap;alignment:start;FormLabel{text:"规则名称";}
-                            LineEdit{width:root.field-width;horizontal-stretch:0;vertical-stretch:0;height:EditorMetrics.control-height;text <=> root.rule-name;placeholder-text:"例如：连接超时";}
+                            rule-name-input := LineEdit{property <int> focus-generation:parent.focus-generation;width:root.field-width;horizontal-stretch:0;vertical-stretch:0;height:EditorMetrics.control-height;text <=> root.rule-name;placeholder-text:"例如：连接超时";changed focus-generation=>{self.focus();}}
                         }
                         HorizontalBox {padding:0;vertical-stretch:0;height:32px;
                             spacing:EditorMetrics.field-gap;alignment:start;FormLabel{text:"状态";}

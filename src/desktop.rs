@@ -1245,6 +1245,7 @@ fn open_rule(e: &EditorWindow, d: &mut Draft, mut edit: Draft, new: bool) {
     e.set_menu_row(-1);
     d.editing = Some(Box::new(edit));
     e.invoke_focus_dialog();
+    e.set_rule_name_focus_generation(e.get_rule_name_focus_generation() + 1);
 }
 
 /// 从表单构造候选草稿，验证/预览都使用它，失败不会留下半条规则。
@@ -1527,6 +1528,93 @@ fn reorder_file_rule(rules: &mut RuleSet, system: bool, id: &str, anchor: &str, 
     } else {
         reorder(&mut rules.rules, id, anchor, after, |r| &r.id)
     }
+}
+
+/// 按日志侧栏的完整可见顺序移动文件；关联规则只在存在目标规则时同步移动。
+fn reorder_log_files(
+    rules: &mut RuleSet,
+    visible: &[String],
+    from: usize,
+    to: usize,
+    system: bool,
+) -> bool {
+    if from >= visible.len() || to >= visible.len() || from == to {
+        return false;
+    }
+    let source = visible[from].clone();
+    let target = visible[to].clone();
+    let mut files = visible.to_vec();
+    let moving = files.remove(from);
+    files.insert(to, moving);
+    rules.layout.file_order = files;
+
+    let moving_down = from < to;
+    if system {
+        let related = |r: &SystemRule, id: &str| r.source_file_id == id;
+        let moving_rules = rules
+            .system
+            .iter()
+            .filter(|r| related(r, &source) && !related(r, &target))
+            .cloned()
+            .collect::<Vec<_>>();
+        let has_anchor = rules
+            .system
+            .iter()
+            .any(|r| related(r, &target) && !related(r, &source));
+        if !moving_rules.is_empty() && has_anchor {
+            rules
+                .system
+                .retain(|r| !(related(r, &source) && !related(r, &target)));
+            let anchor = if moving_down {
+                rules
+                    .system
+                    .iter()
+                    .rposition(|r| related(r, &target) && !related(r, &source))
+                    .map(|i| i + 1)
+            } else {
+                rules
+                    .system
+                    .iter()
+                    .position(|r| related(r, &target) && !related(r, &source))
+            };
+            if let Some(at) = anchor {
+                rules.system.splice(at..at, moving_rules);
+            }
+        }
+    } else {
+        let related = |r: &Rule, id: &str| r.source_file_ids.iter().any(|x| x == id);
+        let moving_rules = rules
+            .rules
+            .iter()
+            .filter(|r| related(r, &source) && !related(r, &target))
+            .cloned()
+            .collect::<Vec<_>>();
+        let has_anchor = rules
+            .rules
+            .iter()
+            .any(|r| related(r, &target) && !related(r, &source));
+        if !moving_rules.is_empty() && has_anchor {
+            rules
+                .rules
+                .retain(|r| !(related(r, &source) && !related(r, &target)));
+            let anchor = if moving_down {
+                rules
+                    .rules
+                    .iter()
+                    .rposition(|r| related(r, &target) && !related(r, &source))
+                    .map(|i| i + 1)
+            } else {
+                rules
+                    .rules
+                    .iter()
+                    .position(|r| related(r, &target) && !related(r, &source))
+            };
+            if let Some(at) = anchor {
+                rules.rules.splice(at..at, moving_rules);
+            }
+        }
+    }
+    true
 }
 
 fn pos(s: &str, a: &[&str]) -> i32 {
@@ -2302,6 +2390,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                 e.set_menu_row(-1);
                 e.set_dragging(false);
                 e.set_drag_from(-1);
+                e.set_file_drop_target(-1);
                 let mut d = d.borrow_mut();
                 flush_inline(&e, &mut d);
                 d.selected = None;
@@ -2641,6 +2730,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
             let e = w.unwrap();
             e.set_drag_from(-1);
             e.set_dragging(false);
+            e.set_file_drop_target(-1);
             let mut d = d.borrow_mut();
             flush_inline(&e, &mut d);
             if let Err(err) = apply(&e, &mut d) {
@@ -2696,6 +2786,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
             let e = w.unwrap();
             e.set_drag_from(-1);
             e.set_dragging(false);
+            e.set_file_drop_target(-1);
             refresh(&e, &mut d.borrow_mut());
         });
     }
@@ -3137,59 +3228,27 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
             let e = w.unwrap();
             let mut d = d.borrow_mut();
             let visible = e.get_file_names();
-            let Some(source) = visible.row_data(from as usize).map(|s| s.to_string()) else {
-                return;
-            };
-            let Some(target) = visible.row_data(to as usize).map(|s| s.to_string()) else {
-                return;
-            };
-            let mut files = d.rules.layout.file_order.clone();
-            files.retain(|f| f != &source);
-            let at = files
-                .iter()
-                .position(|f| f == &target)
-                .unwrap_or(files.len());
-            files.insert(at, source.clone());
-            d.rules.layout.file_order = files;
-            // 日志文件排序同时调整关联规则的整体顺序，报告会按新的规则顺序展示命中结果。
+            let visible = (0..visible.row_count())
+                .filter_map(|i| visible.row_data(i).map(|s| s.to_string()))
+                .collect::<Vec<_>>();
             let system = d.section == 1;
-            if system {
-                let moving = d
-                    .rules
-                    .system
-                    .iter()
-                    .filter(|r| r.source_file_id == source)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                d.rules.system.retain(|r| r.source_file_id != source);
-                let at = d
-                    .rules
-                    .system
-                    .iter()
-                    .position(|r| r.source_file_id == target)
-                    .unwrap_or(d.rules.system.len());
-                d.rules.system.splice(at..at, moving);
-            } else {
-                let moving = d
-                    .rules
-                    .rules
-                    .iter()
-                    .filter(|r| r.source_file_ids.contains(&source))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                d.rules
-                    .rules
-                    .retain(|r| !r.source_file_ids.contains(&source));
-                let at = d
-                    .rules
-                    .rules
-                    .iter()
-                    .position(|r| r.source_file_ids.contains(&target))
-                    .unwrap_or(d.rules.rules.len());
-                d.rules.rules.splice(at..at, moving);
+            if reorder_log_files(&mut d.rules, &visible, from as usize, to as usize, system) {
+                e.set_dirty(true);
+                refresh(&e, &mut d);
             }
-            e.set_dirty(true);
-            refresh(&e, &mut d);
+        });
+    }
+    {
+        let w = e.as_weak();
+        e.on_file_drag_hover(move |y| {
+            let e = w.unwrap();
+            let count = e.get_file_names().row_count();
+            if count == 0 {
+                e.set_file_drop_target(-1);
+                return;
+            }
+            let target = ((y.max(0.0) / 62.0).floor() as usize).min(count - 1);
+            e.set_file_drop_target(target as i32);
         });
     }
     {
@@ -3243,6 +3302,131 @@ mod tests {
         assert!(save_rules_at(&path, &rules).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), original);
     }
+    #[test]
+    fn log_file_sort_uses_visible_order_and_preserves_related_rule_data() {
+        let mut rules = RuleSet::defaults();
+        rules.log_files = ["a", "b", "c"]
+            .into_iter()
+            .map(|id| LogFile {
+                id: id.into(),
+                name: id.into(),
+                path: format!("{id}.log"),
+                mode: "prefix".into(),
+                container: "diagnostic_archive".into(),
+            })
+            .collect();
+        rules.layout.file_order = vec!["a".into(), "c".into()];
+        let template = rules.rules[0].clone();
+        rules.rules = [
+            ("rule-a", vec!["a"]),
+            ("rule-b", vec!["b"]),
+            ("rule-c", vec!["c"]),
+            ("rule-shared", vec!["a", "c"]),
+        ]
+        .into_iter()
+        .map(|(id, source_file_ids)| Rule {
+            id: id.into(),
+            source_file_ids: source_file_ids.into_iter().map(String::from).collect(),
+            group: format!("group-{id}"),
+            ..template.clone()
+        })
+        .collect();
+        let original = rules.rules.clone();
+        let visible = ["a", "b", "c"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+
+        assert!(reorder_log_files(&mut rules, &visible, 0, 2, false));
+        assert_eq!(
+            rules.layout.file_order,
+            ["b", "c", "a"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            rules
+                .rules
+                .iter()
+                .map(|r| r.id.as_str())
+                .collect::<Vec<_>>(),
+            ["rule-b", "rule-c", "rule-a", "rule-shared"]
+        );
+        for row in &rules.rules {
+            let before = original.iter().find(|r| r.id == row.id).unwrap();
+            assert_eq!(
+                serde_json::to_value(row).unwrap(),
+                serde_json::to_value(before).unwrap()
+            );
+        }
+
+        let visible_after_down = rules.layout.file_order.clone();
+        assert!(reorder_log_files(
+            &mut rules,
+            &visible_after_down,
+            2,
+            0,
+            false
+        ));
+        assert_eq!(
+            rules.layout.file_order,
+            ["a", "b", "c"]
+                .into_iter()
+                .map(String::from)
+                .collect::<Vec<_>>()
+        );
+        let before_noop = serde_json::to_value(&rules).unwrap();
+        let visible_for_noop = rules.layout.file_order.clone();
+        assert!(!reorder_log_files(
+            &mut rules,
+            &visible_for_noop,
+            1,
+            1,
+            false
+        ));
+        assert_eq!(serde_json::to_value(&rules).unwrap(), before_noop);
+
+        let mut without_target_rules = rules.clone();
+        without_target_rules
+            .rules
+            .retain(|r| !r.source_file_ids.iter().any(|id| id == "b"));
+        let rules_before_empty_target = serde_json::to_value(&without_target_rules.rules).unwrap();
+        let visible_for_empty_target = without_target_rules.layout.file_order.clone();
+        assert!(reorder_log_files(
+            &mut without_target_rules,
+            &visible_for_empty_target,
+            0,
+            1,
+            false
+        ));
+        assert_eq!(
+            serde_json::to_value(&without_target_rules.rules).unwrap(),
+            rules_before_empty_target
+        );
+
+        let mut system_rules = RuleSet::defaults();
+        let system_template = system_rules.system[0].clone();
+        system_rules.system = ["a", "b", "c"]
+            .into_iter()
+            .map(|source_file_id| SystemRule {
+                id: format!("system-{source_file_id}"),
+                source_file_id: source_file_id.into(),
+                ..system_template.clone()
+            })
+            .collect();
+        system_rules.layout.file_order = visible.clone();
+        assert!(reorder_log_files(&mut system_rules, &visible, 0, 2, true));
+        assert_eq!(
+            system_rules
+                .system
+                .iter()
+                .map(|r| r.source_file_id.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "c", "a"]
+        );
+    }
+
     #[test]
     fn file_sort_keeps_report_groups_sources_and_hidden_rules() {
         let mut rules = RuleSet::defaults();

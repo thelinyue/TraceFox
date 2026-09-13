@@ -2681,5 +2681,14 @@
       "log-file-023",
       "log-file-024"
     ]
+  },
+  "timeline": {
+    "events": [],
+    "judgements": [],
+    "thresholds": {
+      "match_window_seconds": 300,
+      "gap_seconds": 120
+    },
+    "sources": []
   }
 }
