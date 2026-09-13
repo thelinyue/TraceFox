@@ -149,3 +149,14 @@ python -c "import sys,runpy; sys.path.insert(0,'validation/python_deps'); runpy.
 - 不更改 Windows 全局 DPI；应用缩放不等同于真实系统 DPI 验收。未提交、推送、发布或覆盖 dist。
 
 - 最终显示修正后，`scripts/validate_compact.py` 两档缩放通过主窗口、编辑器入口、导入预览、WebDAV 弹窗、实际手动导入及放大窗口后按钮高度检查。
+
+
+## 2026-09-13 Windows 通知、开机启动与标题栏设置
+
+- `cargo test --locked`：65 项通过，1 项性能测试按原有规则忽略；包含旧设置兼容、中文/空格启动路径、隔离注册表启动项增改删、通知 XML 特殊字符。
+- `scripts/validate_startup.py`：100% / 150% 缩放均通过。覆盖标题栏拖动、边缘缩放、双击最大化、最大化/还原/最小化、关闭到托盘；设置取消与 Escape、保存、禁用背景控件；注册表写后校验、配置落盘失败时回滚启动项；`--startup` 隐藏与显示、手动启动显示。测试使用临时用户配置，并恢复原有 TraceFox 启动项。未执行 Windows 注销或重启。
+- `scripts/validate_notifications.py`：Windows 实际弹出 TraceFox 成功/失败通知；点击失败通知从托盘恢复并高亮任务；点击含中文、空格、`&` 的成功通知后，核对浏览器地址确为对应 `report.html`。只使用合成 TGZ。
+- `scripts/validate_compact.py`：100% / 150% 缩放的主窗口、规则编辑器、导入与任务行尺寸检查通过。
+- 任务全周期回归：两档缩放均通过监控、取消/重试、损坏包删除及旧报告保留、批量清理范围和确认。原 `validate_tasks.py` 在已有损坏包输出目录上调用 `mkdir()` 导致夹具失败；仅在本次执行副本中改为 `mkdir(exist_ok=True)` 后运行，未修改业务实现或该脚本文件。
+- 最终截图位于 `target/startup-validation/main-1.png`、`settings-1.png` 及对应 `1.5` 文件；通知截图位于 `target/notification-validation/success-toast.png`、`failure-toast.png`、`failure-selected.png`。已人工查看两档界面截图，核对齿轮位置、图标线条、标题栏对齐、弹窗遮挡与文字裁切；修正过字符齿轮和背景焦点残留后重新截图。
+- 通知遵从系统免打扰/通知设置；本次未执行安装器卸载验证，未提交、推送或发布。

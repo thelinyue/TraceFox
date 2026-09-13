@@ -19,6 +19,7 @@ use tracefox::{
 };
 slint::include_modules!();
 
+/// 桌面偏好与监控配置共用本地设置文件；新增启动选项对旧配置默认为关闭。
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Settings {
     directory: String,
@@ -26,7 +27,53 @@ struct Settings {
     /// WebDAV 配置；密码通过系统凭据库保存，不写入此文件。
     #[serde(default)]
     webdav: Option<tracefox::webdav::WebDavSettings>,
+    #[serde(default)]
+    autostart: bool,
+    #[serde(default)]
+    start_minimized: bool,
 }
+
+/// 设置保存以系统启动项和 JSON 均成功为准；JSON 落盘失败时恢复原启动命令。
+fn persist_startup(settings: &Settings) -> Result<()> {
+    use crate::windows_integration::{startup_command, startup_value, write_startup};
+    let previous = startup_value().context("无法读取 Windows 启动项")?;
+    let command = settings
+        .autostart
+        .then(|| std::env::current_exe().map(|p| startup_command(&p)))
+        .transpose()?;
+    if let Err(e) = write_startup(command.as_deref()).context("无法保存 Windows 启动项") {
+        if let Err(rollback) = write_startup(previous.as_deref()) {
+            anyhow::bail!("{e:#}；恢复原启动项也失败：{rollback:#}");
+        }
+        return Err(e);
+    }
+    if let Err(e) = save_json("settings.json", settings) {
+        if let Err(rollback) = write_startup(previous.as_deref()) {
+            anyhow::bail!("保存设置失败：{e:#}；恢复原启动项也失败：{rollback:#}");
+        }
+        anyhow::bail!("保存设置失败，启动项已恢复：{e:#}");
+    }
+    Ok(())
+}
+
+/// 托盘和失败通知共用恢复入口，同时处理隐藏、最小化与前台焦点。
+fn show_main(ui: &AppWindow) {
+    let _ = ui.show();
+    ui.window().set_minimized(false);
+    use slint::winit_030::WinitWindowAccessor;
+    ui.window()
+        .with_winit_window(|window| window.focus_window());
+}
+
+fn open_report_path(path: &std::path::Path) -> Result<()> {
+    anyhow::ensure!(
+        path.is_file(),
+        "报告文件不存在，可能已被移动或清理：{}",
+        path.display()
+    );
+    open::that(path).context("无法打开 HTML 报告，请检查默认浏览器设置")
+}
+
 fn data_dir() -> PathBuf {
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -330,7 +377,7 @@ fn load_tray_icon() -> Result<tray_icon::Icon> {
     tray_icon::Icon::from_rgba(image.into_raw(), width, height).context("内置托盘图标数据无效")
 }
 
-pub fn run() -> Result<()> {
+pub fn run(startup: bool) -> Result<()> {
     let dir = data_dir();
     let rules = if default_rules_path().exists() {
         RuleSet::import(&std::fs::read_to_string(default_rules_path())?)?
@@ -341,7 +388,42 @@ pub fn run() -> Result<()> {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
+    let start_hidden = startup && settings.start_minimized;
     let ui = AppWindow::new()?;
+    {
+        use slint::winit_030::WinitWindowAccessor;
+        let weak = ui.as_weak();
+        ui.on_drag_window(move || {
+            weak.unwrap().window().with_winit_window(|w| {
+                let _ = w.drag_window();
+            });
+        });
+        let weak = ui.as_weak();
+        ui.on_minimize_window(move || weak.unwrap().window().set_minimized(true));
+        let weak = ui.as_weak();
+        ui.on_maximize_window(move || {
+            weak.unwrap()
+                .window()
+                .with_winit_window(|w| w.set_maximized(!w.is_maximized()));
+        });
+        let weak = ui.as_weak();
+        ui.on_hide_window(move || {
+            let _ = weak.unwrap().hide();
+        });
+        let weak = ui.as_weak();
+        ui.on_resize_window(move |edge| {
+            use slint::winit_030::winit::window::ResizeDirection::*;
+            if let Some(&direction) = [
+                North, NorthEast, East, SouthEast, South, SouthWest, West, NorthWest,
+            ]
+            .get(edge as usize)
+            {
+                weak.unwrap().window().with_winit_window(|w| {
+                    let _ = w.drag_resize_window(direction);
+                });
+            }
+        });
+    }
     ui.set_tasks(ModelRc::new(VecModel::<TaskRow>::default()));
     ui.set_directory(directory_label(&settings.directory).into());
     ui.set_watching(settings.watching);
@@ -393,6 +475,54 @@ pub fn run() -> Result<()> {
         });
     }
     {
+        let weak = ui.as_weak();
+        let state = state.clone();
+        ui.on_open_settings(move || {
+            let ui = weak.unwrap();
+            let settings = &state.borrow().settings;
+            ui.set_draft_minimized(settings.start_minimized);
+            match crate::windows_integration::startup_value() {
+                Ok(value) => {
+                    ui.set_draft_autostart(value.is_some());
+                    ui.set_settings_feedback(
+                        if value.is_some() {
+                            "已保存：开机自启已开启"
+                        } else {
+                            "已保存：开机自启未开启"
+                        }
+                        .into(),
+                    );
+                }
+                Err(e) => {
+                    ui.set_draft_autostart(settings.autostart);
+                    ui.set_settings_feedback(format!("无法读取启动项：{e:#}").into());
+                }
+            }
+            ui.set_settings_open(true);
+            ui.invoke_focus_settings();
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        let state = state.clone();
+        ui.on_save_settings(move || {
+            let ui = weak.unwrap();
+            let mut settings = state.borrow().settings.clone();
+            settings.autostart = ui.get_draft_autostart();
+            settings.start_minimized = ui.get_draft_minimized();
+            match persist_startup(&settings) {
+                Ok(()) => {
+                    state.borrow_mut().settings = settings;
+                    ui.set_settings_open(false);
+                }
+                Err(e) => {
+                    eprintln!("TraceFox：{e:#}");
+                    ui.set_settings_feedback(format!("{e:#}").into());
+                }
+            }
+        });
+    }
+    {
         let st = state.clone();
         ui.on_cancel(move |id| cancel_task(&mut st.borrow_mut(), id));
     }
@@ -415,7 +545,7 @@ pub fn run() -> Result<()> {
         ui.on_open_report(move |id| {
             let report = st.borrow().tasks.get(id).and_then(|r| r.report.clone());
             if let Some(path) = report {
-                if let Err(e) = open::that(path) {
+                if let Err(e) = open_report_path(&path) {
                     error(format!("无法打开 HTML：{e}"));
                 }
             }
@@ -554,8 +684,18 @@ pub fn run() -> Result<()> {
             EventResult::Propagate
         });
     }
-    ui.window()
-        .on_close_requested(|| slint::CloseRequestResponse::HideWindow);
+    {
+        let weak = ui.as_weak();
+        ui.window().on_close_requested(move || {
+            let ui = weak.unwrap();
+            if ui.get_settings_open() {
+                ui.set_settings_open(false);
+                slint::CloseRequestResponse::KeepWindowShown
+            } else {
+                slint::CloseRequestResponse::HideWindow
+            }
+        });
+    }
     let menu = tray_icon::menu::Menu::new();
     let show = tray_icon::menu::MenuItem::new("打开 TraceFox", true, None);
     let pause = tray_icon::menu::MenuItem::new("暂停 / 恢复监控", true, None);
@@ -566,6 +706,14 @@ pub fn run() -> Result<()> {
         .with_tooltip("TraceFox · NAS 诊断信息提取")
         .with_icon(load_tray_icon()?)
         .build()?;
+    let (activation_tx, activation_rx) = mpsc::channel();
+    let mut notifications = match crate::windows_integration::Notifications::new(activation_tx) {
+        Ok(notifications) => Some(notifications),
+        Err(e) => {
+            eprintln!("TraceFox：Windows 通知初始化失败：{e:#}");
+            None
+        }
+    };
     let timer = slint::Timer::default();
     let weak = ui.as_weak();
     let st = state.clone();
@@ -578,13 +726,48 @@ pub fn run() -> Result<()> {
             };
             while let Ok(e) = tray_icon::menu::MenuEvent::receiver().try_recv() {
                 if e.id == *show.id() {
-                    let _ = ui.show();
+                    show_main(&ui);
                 } else if e.id == *pause.id() {
                     ui.set_watching(!st.borrow().settings.watching);
                     choose_monitor(&ui, &st, false);
                 } else if e.id == *quit.id() {
                     st.borrow().cancel.store(true, Ordering::Relaxed);
                     let _ = slint::quit_event_loop();
+                }
+            }
+            while let Ok(action) = activation_rx.try_recv() {
+                use crate::windows_integration::Activation;
+                match action {
+                    Activation::Report(path) => {
+                        if let Err(e) = open_report_path(&path) {
+                            show_main(&ui);
+                            rfd::MessageDialog::new()
+                                .set_title("无法打开 HTML 报告")
+                                .set_description(format!("{e:#}"))
+                                .show();
+                        }
+                    }
+                    Activation::Failed { id, package, error } => {
+                        show_main(&ui);
+                        let state = st.borrow();
+                        if let Some(index) = state
+                            .tasks
+                            .rows
+                            .iter()
+                            .position(|r| r.id == id && r.package == package)
+                        {
+                            ui.set_selected_task(id);
+                            ui.set_task_scroll_y(-54.0 * index as f32);
+                        } else {
+                            rfd::MessageDialog::new()
+                                .set_title("诊断包分析失败")
+                                .set_description(format!(
+                                    "{}\n{error}\n该任务已不在本次分析列表中。",
+                                    package.display()
+                                ))
+                                .show();
+                        }
+                    }
                 }
             }
             let mut s = st.borrow_mut();
@@ -637,6 +820,27 @@ pub fn run() -> Result<()> {
                                         path.clone(),
                                         (engine::stamp(&path).ok(), Instant::now()),
                                     );
+                                }
+                            }
+                        }
+                        if let (Some(notifications), Some(task)) =
+                            (notifications.as_mut(), s.tasks.get(id))
+                        {
+                            use crate::windows_integration::Activation;
+                            let action = match task.phase {
+                                Phase::Completed => task.report.clone().map(Activation::Report),
+                                Phase::Failed | Phase::Damaged => Some(Activation::Failed {
+                                    id,
+                                    package: task.package.clone(),
+                                    error: task.status.clone(),
+                                }),
+                                _ => None,
+                            };
+                            if let Some(action) = action {
+                                if let Err(e) =
+                                    notifications.show(&task.package, &task.status, action)
+                                {
+                                    eprintln!("TraceFox：通知发送失败：{e:#}");
                                 }
                             }
                         }
@@ -897,7 +1101,9 @@ pub fn run() -> Result<()> {
             }
         },
     );
-    ui.show()?;
+    if !start_hidden {
+        ui.show()?;
+    }
     slint::run_event_loop_until_quit()?;
     Ok(())
 }
@@ -1757,7 +1963,7 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
                     e.set_catalog_open(false);
                     e.set_dialog_open(false);
                     refresh(&e, &mut draft);
-                    e.set_feedback("日志文件已加入草稿，保存全部后生效".into());
+                    e.set_feedback("日志文件已添加，现在可以添加规则".into());
                     e.invoke_focus_list();
                 }
                 Err(err) => e.set_catalog_error(err.to_string().into()),
@@ -2905,6 +3111,24 @@ fn make_editor(state: Rc<RefCell<State>>) -> Result<EditorWindow> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_settings_keep_startup_disabled_and_preserve_monitor() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"directory":"downloads","watching":true}"#).unwrap();
+        assert!(!settings.autostart);
+        assert!(!settings.start_minimized);
+        assert!(settings.watching);
+        assert_eq!(settings.directory, "downloads");
+        let enabled = Settings {
+            autostart: true,
+            start_minimized: true,
+            ..settings
+        };
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&enabled).unwrap()).unwrap();
+        assert!(restored.autostart && restored.start_minimized && restored.watching);
+    }
 
     #[test]
     fn portable_rules_save_creates_directory_and_preserves_previous_on_failure() {

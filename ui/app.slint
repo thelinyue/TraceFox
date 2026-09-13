@@ -1,7 +1,25 @@
 import { Button, LineEdit, VerticalBox, HorizontalBox, CheckBox, ScrollView, ComboBox, SpinBox, TextEdit, ProgressIndicator } from "std-widgets.slint";
 export struct TaskRow { id:int, package:string, status:string, active:bool, cancellable:bool, completed:bool, damaged:bool, cleaning:bool }
+// 标题栏按钮独立于业务工具栏，支持键盘与读屏；窗口行为仍由 Windows 后端执行。
+component CaptionButton inherits Rectangle {
+    in property <string> text;
+    in property <string> label;
+    in property <bool> danger;
+    in property <bool> settings-icon;
+    in property <bool> enabled:true;
+    callback clicked();
+    width:44px;height:36px;horizontal-stretch:0;
+    accessible-role:button;accessible-label:root.label;accessible-enabled:root.enabled;
+    accessible-action-default=>{if root.enabled {root.clicked();}}
+    background:root.enabled && area.has-hover ? (root.danger ? #c42b1c : #e5e9ef) : transparent;
+    border-width:root.enabled && key.has-focus ? 1px : 0px;border-color:#2468d8;
+    if root.settings-icon: Image {source:@image-url("../assets/icons/settings.svg");width:18px;height:18px;x:(parent.width - self.width)/2;y:(parent.height - self.height)/2;image-fit:contain;}
+    if !root.settings-icon: Text{text:root.text;font-size:16px;horizontal-alignment:center;vertical-alignment:center;color:root.danger && area.has-hover ? #fff : #354052;}
+    key := FocusScope {enabled:root.enabled;key-pressed(event)=>{if event.text==Key.Return || event.text==" " {root.clicked();return accept;}return reject;}}
+    area := TouchArea {enabled:root.enabled;clicked=>{root.clicked();}}
+}
 export component AppWindow inherits Window {
-    title: "TraceFox"; icon: @image-url("../assets/branding/tracefox-app.png"); preferred-width:560px;preferred-height:460px;min-width:520px;min-height:420px;
+    title: "TraceFox"; icon: @image-url("../assets/branding/tracefox-app.png"); preferred-width:560px;preferred-height:496px;min-width:520px;min-height:456px;no-frame:true;
     in-out property <string> directory;
     in-out property <bool> watching;
     in property <string> monitor-status;
@@ -10,21 +28,52 @@ export component AppWindow inherits Window {
     in property <bool> cleaning;
     in property <[TaskRow]> tasks;
     callback choose-directory();callback toggle-watch();callback import-package();callback edit-rules();
+    callback open-settings();
+    callback save-settings();
+    callback drag-window();callback minimize-window();callback maximize-window();callback hide-window();callback resize-window(int);
+    Rectangle {x:0px;y:0px;width:parent.width;height:36px;background:#f8fafc;
+        HorizontalBox {padding:0;spacing:0;
+            Rectangle {horizontal-stretch:1;
+                HorizontalBox {padding:0;padding-left:12px;padding-top:8px;padding-bottom:8px;spacing:8px;alignment:start;
+                    Image {source:@image-url("../assets/branding/tracefox-app.png");width:20px;height:20px;vertical-stretch:0;image-fit:contain;}
+                    Text{text:"TraceFox";font-size:12px;vertical-alignment:center;horizontal-stretch:1;}
+                }
+                TouchArea {
+                    property <length> down-x;property <length> down-y;
+                    pointer-event(event)=>{if event.kind==PointerEventKind.down {self.down-x=self.mouse-x;self.down-y=self.mouse-y;}}
+                    moved=>{if self.pressed && (abs(self.mouse-x - self.down-x)>3px || abs(self.mouse-y - self.down-y)>3px) {root.drag-window();}}
+                    double-clicked=>{root.maximize-window();}
+                }
+            }
+            CaptionButton{enabled:!root.settings-open;settings-icon:true;label:"设置";clicked=>{root.open-settings();}}
+            CaptionButton{enabled:!root.settings-open;text:"−";label:"最小化";clicked=>{root.minimize-window();}}
+            CaptionButton{enabled:!root.settings-open;text:root.maximized ? "❐" : "□";label:root.maximized ? "还原窗口" : "最大化";clicked=>{root.maximize-window();}}
+            CaptionButton{enabled:!root.settings-open;text:"×";label:"关闭到托盘";danger:true;clicked=>{root.hide-window();}}
+        }
+    }
+    in-out property <bool> settings-open;
+    in-out property <bool> draft-autostart;
+    in-out property <bool> draft-minimized;
+    in property <string> settings-feedback;
+    in property <int> selected-task: -1;
+    in-out property <length> task-scroll-y;
+    public function focus-settings() { settings-focus.focus(); }
     callback cancel(int);callback retry(int);callback details(int);callback delete-damaged(int);callback open-report(int);callback open-folder(int);callback cleanup-report(int);callback cleanup-completed();
     // 监控配置归为一组；任务进度及操作只出现在对应行，避免全局状态串到其他诊断包。
+    Rectangle {y:36px;width:parent.width;height:parent.height - 36px;
     VerticalBox {padding:14px;spacing:8px;
         HorizontalBox {padding:0;spacing:6px;vertical-stretch:0;height:32px;
-            Button {enabled:!root.cleaning;text:root.watching ? "暂停监控" : "开启监控";primary:root.watching;accessible-checkable:true;accessible-checked:root.watching;clicked=>{root.watching=!root.watching;root.toggle-watch();}}
+            Button {enabled:!root.settings-open && !root.cleaning;text:root.watching ? "暂停监控" : "开启监控";primary:root.watching;accessible-checkable:true;accessible-checked:root.watching;clicked=>{root.watching=!root.watching;root.toggle-watch();}}
             LineEdit {read-only:true;text:root.directory;placeholder-text:"选择下载目录";horizontal-stretch:1;}
-            Button {enabled:!root.cleaning;text:"选择";clicked=>{root.choose-directory();}}
+            Button {enabled:!root.settings-open && !root.cleaning;text:"选择";clicked=>{root.choose-directory();}}
         }
         HorizontalBox {padding:0;spacing:6px;vertical-stretch:0;height:28px;
             Text {text:root.monitor-status;color:#687386;font-size:12px;overflow:elide;vertical-alignment:center;horizontal-stretch:1;}
-            Button {text:root.cleaning ? "正在清理…" : "清理已完成";enabled:root.can-cleanup;clicked=>{root.cleanup-completed();}}
+            Button {text:root.cleaning ? "正在清理…" : "清理已完成";enabled:!root.settings-open && root.can-cleanup;clicked=>{root.cleanup-completed();}}
         }
         HorizontalBox {padding:0;spacing:6px;alignment:start;vertical-stretch:0;height:32px;
-            Button {text:"导入诊断包";primary:true;clicked=>{root.import-package();}}
-            Button {text:"关键词与报告规则";clicked=>{root.edit-rules();}}
+            Button {enabled:!root.settings-open;text:"导入诊断包";primary:true;clicked=>{root.import-package();}}
+            Button {enabled:!root.settings-open;text:"关键词与报告规则";clicked=>{root.edit-rules();}}
         }
         Rectangle {vertical-stretch:1;min-height:140px;background:#f1f4f8;border-radius:8px;
             VerticalBox {padding:8px;spacing:6px;
@@ -33,28 +82,28 @@ export component AppWindow inherits Window {
                     Text {text:root.queue-text;color:#687386;font-size:12px;horizontal-alignment:right;}
                 }
                 if root.tasks.length==0: Rectangle {vertical-stretch:1;Text{text:"导入诊断包，或开启目录监控";color:#687386;font-size:12px;horizontal-alignment:center;vertical-alignment:center;}}
-                if root.tasks.length>0: task-scroll := ScrollView {vertical-stretch:1;viewport-height:max(self.visible-height,task-items.min-height);
+                if root.tasks.length>0: task-scroll := ScrollView {viewport-y <=> root.task-scroll-y;vertical-stretch:1;viewport-height:max(self.visible-height,task-items.min-height);
                     task-items := VerticalBox {x:0px;y:0px;width:task-scroll.visible-width;height:self.min-height;padding:0;spacing:6px;alignment:start;
-                        for task in root.tasks: Rectangle {height:48px;vertical-stretch:0;background:#fff;border-radius:6px;
+                        for task in root.tasks: Rectangle {height:48px;vertical-stretch:0;background:task.id==root.selected-task ? #edf4ff : #fff;border-radius:6px;border-width:task.id==root.selected-task ? 1px : 0px;border-color:#2468d8;
                             HorizontalBox {padding:6px;spacing:6px;
                                 VerticalBox {padding:0;spacing:2px;horizontal-stretch:1;
                                     Text {text:task.package;overflow:elide;vertical-stretch:0;}
                                     Text {text:task.cleaning ? "正在清理…" : task.status;overflow:elide;color:#687386;font-size:12px;vertical-stretch:0;}
                                 }
-                                if task.completed: Button {height:32px;vertical-stretch:0;text:"打开 HTML";enabled:!task.cleaning;clicked=>{root.open-report(task.id);}}
-                                if task.completed: Button {height:32px;vertical-stretch:0;text:"打开目录";enabled:!task.cleaning;clicked=>{root.open-folder(task.id);}}
-                                if !task.completed && !task.damaged: Button {height:32px;vertical-stretch:0;text:"详情";clicked=>{root.details(task.id);}}
-                                if task.active: Button {height:32px;vertical-stretch:0;text:task.cancellable ? "取消" : "取消中";enabled:task.cancellable;clicked=>{root.cancel(task.id);}}
-                                if !task.active && !task.completed && !task.damaged: Button {height:32px;vertical-stretch:0;text:"重试";clicked=>{root.retry(task.id);}}
-                                if task.damaged: Button {height:32px;vertical-stretch:0;text:"删除";clicked=>{root.delete-damaged(task.id);}}
-                                if task.completed: Button {height:32px;width:32px;vertical-stretch:0;text:"···";accessible-label:"更多操作";enabled:!task.cleaning;clicked=>{menu.show();}}
+                                if task.completed: Button {height:32px;vertical-stretch:0;text:"打开 HTML";enabled:!root.settings-open && !task.cleaning;clicked=>{root.open-report(task.id);}}
+                                if task.completed: Button {height:32px;vertical-stretch:0;text:"打开目录";enabled:!root.settings-open && !task.cleaning;clicked=>{root.open-folder(task.id);}}
+                                if !task.completed && !task.damaged: Button {height:32px;vertical-stretch:0;text:"详情";enabled:!root.settings-open;clicked=>{root.details(task.id);}}
+                                if task.active: Button {height:32px;vertical-stretch:0;text:task.cancellable ? "取消" : "取消中";enabled:!root.settings-open && task.cancellable;clicked=>{root.cancel(task.id);}}
+                                if !task.active && !task.completed && !task.damaged: Button {height:32px;vertical-stretch:0;text:"重试";enabled:!root.settings-open;clicked=>{root.retry(task.id);}}
+                                if task.damaged: Button {height:32px;vertical-stretch:0;text:"删除";enabled:!root.settings-open;clicked=>{root.delete-damaged(task.id);}}
+                                if task.completed: Button {height:32px;width:32px;vertical-stretch:0;text:"···";accessible-label:"更多操作";enabled:!root.settings-open && !task.cleaning;clicked=>{menu.show();}}
                             }
                             menu := PopupWindow {x:parent.width - 150px;y:48px;width:150px;height:116px;
                                 Rectangle {background:#fff;border-width:1px;border-color:#dce2ea;border-radius:6px;
                                     VerticalBox {padding:6px;spacing:4px;
-                                        Button {text:"详情";clicked=>{menu.close();root.details(task.id);}}
-                                        Button {text:"重新分析";clicked=>{menu.close();root.retry(task.id);}}
-                                        Button {text:"清理";clicked=>{menu.close();root.cleanup-report(task.id);}}
+                                        Button {enabled:!root.settings-open;text:"详情";clicked=>{menu.close();root.details(task.id);}}
+                                        Button {enabled:!root.settings-open;text:"重新分析";clicked=>{menu.close();root.retry(task.id);}}
+                                        Button {enabled:!root.settings-open;text:"清理";clicked=>{menu.close();root.cleanup-report(task.id);}}
                                     }
                                 }
                             }
@@ -64,6 +113,42 @@ export component AppWindow inherits Window {
             }
         }
         Text {vertical-stretch:0;text:"关闭窗口进入托盘 · 文件由你自行管理";font-size:12px;color:#687386;}
+    }
+    }
+    for edge in 8: TouchArea {
+        enabled:!root.maximized && !root.settings-open;
+        x:edge==1 || edge==2 || edge==3 ? parent.width - 5px : edge==0 || edge==4 ? 5px : 0px;
+        y:edge==3 || edge==4 || edge==5 ? parent.height - 5px : edge==2 || edge==6 ? 5px : 0px;
+        width:edge==0 || edge==4 ? parent.width - 10px : 5px;
+        height:edge==2 || edge==6 ? parent.height - 10px : 5px;
+        mouse-cursor:edge==0 || edge==4 ? ns-resize : edge==2 || edge==6 ? ew-resize : edge==1 || edge==5 ? nesw-resize : nwse-resize;
+        pointer-event(event)=>{if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.resize-window(edge);}}
+    }
+    // 设置使用独立草稿，背景禁止交互；取消及 Escape 均不保存。
+    settings-focus := FocusScope {
+        visible:root.settings-open;enabled:root.settings-open;
+        width:parent.width;height:parent.height;
+        key-pressed(event)=>{if event.text==Key.Escape {root.settings-open=false;return accept;}return reject;}
+        Rectangle {width:parent.width;height:parent.height;background:#26324780;TouchArea{}}
+        Rectangle {
+            width:min(432px,parent.width - 32px);height:300px;
+            x:(parent.width - self.width)/2;y:(parent.height - self.height)/2;
+            background:#fff;border-radius:12px;border-width:1px;border-color:#dce2ea;
+            VerticalBox {padding:20px;spacing:12px;
+                HorizontalBox {padding:0;height:32px;vertical-stretch:0;
+                    Text{text:"设置";font-size:18px;font-weight:600;vertical-alignment:center;horizontal-stretch:1;}
+                    Button{text:"×";accessible-label:"关闭设置";width:32px;clicked=>{root.settings-open=false;}}
+                }
+                CheckBox{text:"开机自启";checked <=> root.draft-autostart;}
+                CheckBox{text:"开机自动最小化到托盘";checked <=> root.draft-minimized;enabled:root.draft-autostart;}
+                Text{text:"仅开机启动时隐藏窗口，手动打开仍显示主窗口。";wrap:word-wrap;font-size:12px;color:#687386;vertical-stretch:0;}
+                Text{text:root.settings-feedback;wrap:word-wrap;font-size:12px;color:#526172;vertical-stretch:1;}
+                HorizontalBox {padding:0;height:32px;vertical-stretch:0;alignment:end;
+                    Button{text:"取消";clicked=>{root.settings-open=false;}}
+                    Button{text:"保存";primary:true;clicked=>{root.save-settings();}}
+                }
+            }
+        }
     }
 }
 // 列表内容采用整行可点击区域，支持键盘和读屏，不把每条规则画成表单按钮。
@@ -137,6 +222,25 @@ component TermInput inherits FocusScope {
     }
 }
 export struct LogFileChoice { id:string, label:string, chosen:bool }
+// 宽屏侧栏和窄屏选择器复用目录操作，菜单始终针对当前选中的日志文件。
+component FileActions inherits Rectangle {
+    in property <bool> enabled: true;
+    in property <bool> has-selection;
+    callback add(); callback edit(); callback remove();
+    width:100px; height:32px; horizontal-stretch:0;
+    HorizontalBox {padding:0;spacing:4px;
+        Button {text:"添加";accessible-label:"添加日志文件";enabled:root.enabled;clicked=>{root.add();}}
+        Button {text:"···";accessible-label:"日志文件更多操作";width:32px;enabled:root.enabled && root.has-selection;clicked=>{file-menu.show();}}
+    }
+    file-menu := PopupWindow {x:0px;y:36px;width:156px;height:92px;
+        Rectangle {background:#fff;border-width:1px;border-color:#e1e7ef;border-radius:8px;
+            VerticalBox {padding:8px;spacing:4px;
+                Button {text:"编辑日志文件";clicked=>{file-menu.close();root.edit();}}
+                Button {text:"删除日志文件";clicked=>{file-menu.close();root.remove();}}
+            }
+        }
+    }
+}
 export struct FieldListRow { name: string, path: string, format: int }
 export struct RuleListRow { expanded:bool, name: string, identity: string, summary: string, source: string, enabled: bool, offset: float, height: float, terms: [string] }
 
@@ -319,7 +423,6 @@ export component EditorWindow inherits Window {
             }
             if root.section != 3: HorizontalBox { padding:0; height: 32px; vertical-stretch:0;
                 LineEdit {enabled:!root.dialog-open; text <=> root.search; placeholder-text: "搜索当前文件的规则…"; edited => {root.menu-row = -1; root.search-change();} }
-                Button {enabled:!root.dialog-open && root.file-index>=0; text: "＋"; accessible-label:"添加规则到此日志文件"; width:36px; horizontal-stretch:0; primary: true; clicked => {root.add-rule();} }
                 if root.section == 1: Button {enabled:!root.dialog-open;text:"套用参考配置";clicked=>{root.reference-rules();}}
                 Button {enabled:!root.dialog-open;text:"导入";clicked=>{root.import-rules();}}
                 Button {enabled:!root.dialog-open;text:"导出 ▾";clicked=>{root.export-menu = !root.export-menu;}}
@@ -330,28 +433,42 @@ export component EditorWindow inherits Window {
                 Button {enabled:!root.dialog-open && root.webdav-configured;text:"下载规则";clicked=>{root.webdav-download();}}
                 Button {enabled:!root.dialog-open && root.webdav-configured;text:"双向同步";clicked=>{root.webdav-sync();}}
             }
-            if root.section != 3: HorizontalBox {padding:0;height:32px;vertical-stretch:0;alignment:start;
-                Button {text:"新增日志文件"; enabled:!root.dialog-open; clicked=>{root.open-file-form(true);}}
-                Button {text:"编辑日志文件"; enabled:!root.dialog-open && root.file-index>=0; clicked=>{root.open-file-form(false);}}
-                Button {text:"删除日志文件"; enabled:!root.dialog-open && root.file-index>=0; clicked=>{root.delete-file();}}
-            }
             if root.export-menu: HorizontalBox { padding:0;height:32px; alignment:end;
                 Button{enabled:!root.dialog-open;text:"导出全部";clicked=>{root.export-rules(false);root.export-menu=false;}}
                 Button{text:"导出选中";enabled:!root.dialog-open && (root.selected>=0);clicked=>{root.export-rules(true);root.export-menu=false;}}
             }
             if root.search != "": Text {text:"搜索结果中暂停排序，清空搜索后可拖动。";color:#687386;vertical-stretch:0;}
             if root.section!=3: HorizontalBox {padding:0;spacing:12px;min-width:0px;
-                if root.width>=1000px: Rectangle {width:root.file-panel-width;horizontal-stretch:0;background:#edf0f4;border-radius:10px;
-                    VerticalBox {padding:10px;spacing:6px;
-                        Text{text:"日志文件";font-weight:600;color:#526172;vertical-stretch:0;}
-                        ScrollView {VerticalBox {padding:0;spacing:4px;alignment:start;
+                if root.width>=1000px: file-panel := Rectangle {width:root.file-panel-width;horizontal-stretch:0;background:#f7f9fc;border-radius:12px;border-width:1px;border-color:#e1e7ef;
+                    Rectangle {x:14px;y:14px;width:parent.width - 28px;height:parent.height - 28px;
+                        HorizontalBox {x:0px;y:0px;width:parent.width;padding:0;spacing:6px;height:32px;
+                            Text{text:"日志文件";font-size:14px;font-weight:600;color:#263247;vertical-alignment:center;overflow:elide;}
+                            FileActions {enabled:!root.dialog-open;has-selection:root.file-index>=0;add=>{root.open-file-form(true);}edit=>{root.open-file-form(false);}remove=>{root.delete-file();}}
+                        }
+                        ScrollView {x:0px;y:40px;width:parent.width;height:max(0px,parent.height - 40px);VerticalBox {padding:0;spacing:4px;alignment:start;
                             for file[i] in root.file-titles: Rectangle {
-                                height:50px;vertical-stretch:0;
-                                Button {x:24px;width:parent.width - 24px;height:parent.height;enabled:!root.dialog-open;text:file;primary:i==root.file-index;clicked=>{root.select-file(i);}}
-                                TouchArea {x:0px;width:24px;height:parent.height;enabled:!root.dialog-open;mouse-cursor:grab;
+                                height:58px;vertical-stretch:0;
+                                Rectangle {x:24px;width:parent.width - 24px;height:parent.height;background:i==root.file-index ? #e8f1ff : #ffffff;border-radius:8px;border-width:1px;border-color:i==root.file-index ? #b8d0f2 : #e5eaf1;
+                                    Text {x:12px;width:parent.width - 24px;height:parent.height;text:file;vertical-alignment:center;overflow:elide;color:#263247;}
+                                }
+                                // 拖动手柄离开起始行后，由各行的投放区接收释放事件，避免只能在原行内释放。
+                                // 整行捕获拖拽，避免指针离开左侧手柄后 TouchArea 丢失事件。
+                                TouchArea {x:0px;width:parent.width;height:parent.height;enabled:!root.dialog-open;mouse-cursor:grab;
                                     pointer-event(event)=>{
                                         if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.file-drag-from=i;root.file-dragging=false;root.file-drag-y=self.mouse-y;}
-                                        if event.kind==PointerEventKind.up && root.file-drag-from==i {if root.file-dragging {root.drop-file(root.file-drag-from,i);}root.file-drag-from=-1;root.file-dragging=false;}
+                                        if event.kind==PointerEventKind.up && root.file-drag-from>=0 {
+                                            if root.file-dragging {root.drop-file(root.file-drag-from,i);}
+                                            else {root.select-file(i);}
+                                            root.file-drag-from=-1;root.file-dragging=false;
+                                        }
+                                        if event.kind==PointerEventKind.cancel {root.file-drag-from=-1;root.file-dragging=false;}
+                                    }
+                                    moved=>{if root.file-drag-from==i {root.file-dragging=true;}}
+                                }
+                                TouchArea {x:0px;width:0px;height:0px;enabled:false;mouse-cursor:grab;
+                                    pointer-event(event)=>{
+                                        if event.kind==PointerEventKind.down && event.button==PointerEventButton.left {root.file-drag-from=i;root.file-dragging=false;root.file-drag-y=self.mouse-y;}
+                                        if event.kind==PointerEventKind.up && root.file-drag-from==i && !root.file-dragging {root.file-drag-from=-1;}
                                         if event.kind==PointerEventKind.cancel {root.file-drag-from=-1;root.file-dragging=false;}
                                     }
                                     moved=>{if self.pressed && root.file-drag-from==i {if abs(self.mouse-y - self.pressed-y) > 8px {root.file-dragging=true;}}}
@@ -376,9 +493,13 @@ export component EditorWindow inherits Window {
                     }
                 }
                 VerticalBox {padding:0;spacing:8px;
-                    if root.width<1000px: ComboBox {enabled:!root.dialog-open;model:root.file-labels;current-index:root.file-index;selected(_)=>{root.select-file(self.current-index);}}
-                    if root.width>=1000px: Text {text:root.active-file-label=="" ? "请先添加日志文件" : root.active-file-label;font-size:18px;font-weight:600;overflow:elide;vertical-stretch:0;}
-                    Rectangle {background:#f5f6f8;clip:true;
+                    HorizontalBox {padding:0;spacing:8px;height:32px;vertical-stretch:0;
+                        if root.width<1000px: ComboBox {enabled:!root.dialog-open;model:root.file-labels;current-index:root.file-index;selected(_)=>{root.select-file(self.current-index);}}
+                        if root.width<1000px: FileActions {enabled:!root.dialog-open;has-selection:root.file-index>=0;add=>{root.open-file-form(true);}edit=>{root.open-file-form(false);}remove=>{root.delete-file();}}
+                        if root.width>=1000px: Text {text:root.active-file-label=="" ? "请先添加日志文件" : root.active-file-label;font-size:18px;font-weight:600;overflow:elide;vertical-alignment:center;}
+                        Button {enabled:!root.dialog-open && root.file-index>=0;text:"添加规则";accessible-label:"添加规则到当前日志文件";width:88px;horizontal-stretch:0;primary:true;clicked=>{root.add-rule();}}
+                    }
+                    Rectangle {background:#f5f6f8;clip:true;border-radius:12px;
                         list := ScrollView {
                             property <int> reveal-generation:root.focus-generation;
                             property <string> file:root.active-file;
@@ -438,7 +559,9 @@ export component EditorWindow inherits Window {
                     }
 
                         }
-                        if root.rows.length==0: Text {text:root.search=="" ? "点击 ＋ 添加规则" : "没有找到匹配的规则";color:#687386;horizontal-alignment:center;vertical-alignment:center;}
+                        if root.rows.length==0: Rectangle {x:24px;y:24px;width:parent.width - 48px;height:120px;background:#ffffff;border-radius:10px;border-width:1px;border-color:#e1e7ef;
+                            Text {width:parent.width;height:parent.height;text:root.search=="" ? (root.file-index<0 ? "请先添加日志文件" : "还没有规则\n点击“添加规则”创建第一条规则") : "没有找到匹配的规则";color:#687386;horizontal-alignment:center;vertical-alignment:center;}
+                        }
                 if root.dragging && root.drop-target>=0: Rectangle {
                     x:42px;width:parent.width - 60px;height:3px;background:#2468d8;
                     y: root.drop-line-y*1px + list.viewport-y;

@@ -1,9 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod desktop;
+mod windows_integration;
 fn main() {
     if let Err(e) = run() {
         eprintln!("TraceFox：{e:#}");
-        if std::env::args().len() == 1 {
+        if !std::env::args().any(|arg| arg == "--analyze") {
             rfd::MessageDialog::new()
                 .set_title("TraceFox 启动失败")
                 .set_description(format!("{e:#}"))
@@ -29,5 +30,5 @@ fn run() -> anyhow::Result<()> {
         println!("{}", p.display());
         return Ok(());
     }
-    desktop::run()
+    desktop::run(args.iter().any(|arg| arg == "--startup"))
 }

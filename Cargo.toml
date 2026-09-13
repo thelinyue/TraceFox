@@ -28,6 +28,8 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 sha2 = "0.10"
 url = "2"
+windows = { version = "0.62", features = ["Data_Xml_Dom", "UI_Notifications", "Foundation", "Win32_System_WinRT"] }
+winreg = "0.55"
 
 [build-dependencies]
 slint-build = "~1.17"

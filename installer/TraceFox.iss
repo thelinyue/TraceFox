@@ -41,3 +41,8 @@ Name: "{autodesktop}\TraceFox"; Filename: "{app}\TraceFox.exe"; WorkingDir: "{ap
 
 [Run]
 Filename: "{app}\TraceFox.exe"; Description: "启动 TraceFox"; Flags: nowait postinstall skipifsilent
+
+; 自启由应用设置启用，安装时不默认创建；卸载移除本应用的 Windows 集成。
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "TraceFox"; Flags: dontcreatekey uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\TraceFox.Desktop"; Flags: dontcreatekey uninsdeletekey
