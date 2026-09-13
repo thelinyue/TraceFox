@@ -42,7 +42,7 @@ for scale in [1,1.5]:
     env=os.environ.copy();env['LOCALAPPDATA']=str(profile);env['SLINT_SCALE_FACTOR']=str(scale)
     proc=subprocess.Popen([str(exe)],env=env)
     try:
-        time.sleep(2);app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);click(app,'关键词与报告规则')
+        time.sleep(2);app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);click(app,'规则管理')
         e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid);e.wait('visible',timeout=10)
         native=Desktop(backend='win32').window(handle=e.handle)
         native.move_window(x=0,y=0,width=round(1100*scale),height=min(round(700*scale),ctypes.windll.user32.GetSystemMetrics(1)-40));time.sleep(.5)
@@ -57,7 +57,7 @@ for scale in [1,1.5]:
         toggle.set_focus();toggle.type_keys('{SPACE}');time.sleep(.3)
         assert rule_toggle(e,'共享规则').window_text()=='已启用'
         rule_toggle(e,'共享规则').iface_toggle.Toggle();time.sleep(.3);click(e,'取消');assert config.read_bytes()==initial
-        click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
+        click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
         assert rule_toggle(e,'共享规则').window_text()=='已启用'
         open_rule(e,'共享规则');click(e,'已启用');click(e,'取消')
         assert rule_toggle(e,'共享规则').window_text()=='已启用'
@@ -97,7 +97,7 @@ for scale in [1,1.5]:
         click(e,'保存全部');saved=json.loads(config.read_text(encoding='utf-8'));assert len(saved['rules'])==2;assert saved['rules'][0]['terms']==['drawer-saved'];assert saved['rules'][0]['group']=='网络连接';assert saved['rules'][0]['source_file_ids']==rules['rules'][0]['source_file_ids']
         assert saved['rules'][0]['enabled'] is False
         assert saved['rules'][0]['name']==rules['rules'][0]['name'] and saved['rules'][0]['note']==rules['rules'][0]['note']
-        click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
+        click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
         assert rule_toggle(e,'共享规则').window_text()=='已禁用'
         if scale==1 and '--rule-controls-only' not in sys.argv:
             # Native actions: reorder across report groups, copy/cancel, delete, wizard and preview.
@@ -123,16 +123,16 @@ for scale in [1,1.5]:
                 config.rmdir();backup.rename(config)
             click(e,'保存全部');saved=json.loads(config.read_text(encoding='utf-8'))
             assert [r['id'] for r in saved['rules'][:2]]==['second','shared'];assert [r['group'] for r in saved['rules'][:2]]==['另一报告分组','网络连接'];assert len(saved['rules'])==3
-            click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
+            click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
             click(e,'系统信息');click(e,'添加规则到此日志文件')
             controls(e,'Edit')[0].set_edit_text('新系统字段');click(e,'下一步');click(e,'＋ 添加字段')
             edits=controls(e,'Edit');edits[1].set_edit_text('型号');edits[2].set_edit_text('model');capture(e,'uniform-system-fields.png')
             click(e,'下一步');click(e,'完成添加');click(e,'保存全部')
             saved=json.loads(config.read_text(encoding='utf-8'));assert next(r for r in saved['system'] if r['name']=='新系统字段')['fields'][0]['path']=='model'
-            click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
+            click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
             click(e,'报告样式');spinner=controls(e,'Spinner')[-1];r=spinner.rectangle();mouse.click(coords=(r.right-10,r.top+10));time.sleep(.3);click(e,'保存全部')
             saved=json.loads(config.read_text(encoding='utf-8'));assert saved['layout']['log_lines_per_batch']!=rules.get('layout',{}).get('log_lines_per_batch',200)
-            click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
+            click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
         # Small window uses the file picker; all drawer actions remain visible.
         native=Desktop(backend='win32').window(handle=e.handle);native.move_window(x=0,y=0,width=round(800*scale),height=round(580*scale));time.sleep(.4)
         assert controls(e,'ComboBox');capture(e,'file-compact-'+label+'.png')

@@ -58,6 +58,11 @@ fn persist_startup(settings: &Settings) -> Result<()> {
 
 /// 托盘和失败通知共用恢复入口，同时处理隐藏、最小化与前台焦点。
 fn show_main(ui: &AppWindow) {
+    show_and_focus(ui);
+}
+
+/// 将已存在的窗口恢复并置前，避免入口点击后窗口仍被其他窗口遮挡。
+fn show_and_focus<C: ComponentHandle>(ui: &C) {
     let _ = ui.show();
     ui.window().set_minimized(false);
     use slint::winit_030::WinitWindowAccessor;
@@ -702,12 +707,12 @@ pub fn run(startup: bool) -> Result<()> {
         let state = state.clone();
         ui.on_edit_rules(move || {
             if let Some(e) = &state.borrow().editor {
-                let _ = e.show();
+                show_and_focus(e);
                 return;
             }
             match make_editor(state.clone()) {
                 Ok(e) => {
-                    let _ = e.show();
+                    show_and_focus(&e);
                     state.borrow_mut().editor = Some(e);
                 }
                 Err(e) => error(e),

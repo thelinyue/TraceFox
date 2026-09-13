@@ -83,7 +83,7 @@ try:
         app.wait("visible", timeout=30)
         check_window(app, "main", monitors)
 
-        button(app, "关键词与报告规则").invoke()
+        button(app, "规则管理").invoke()
         editor = Desktop(backend="uia").window(
             title="TraceFox · 规则编辑", process=proc.pid
         )

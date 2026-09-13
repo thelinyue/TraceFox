@@ -27,6 +27,9 @@ pub struct Table {
     pub rows: Vec<BTreeMap<String, String>>,
     #[serde(default)]
     pub storage: Vec<StorageContext>,
+    /// lsblk 原始日志文本；仅为块设备规则保留，供报告底部的证据面板展示。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub raw_text: String,
     pub source: String,
     pub warning: String,
 }
@@ -105,6 +108,14 @@ fn formatted(raw: String, f: &Field, captures: &HashMap<String, Regex>) -> Strin
     }
     value
 }
+
+/// 判断系统规则是否描述 lsblk，兼容默认规则和用户自定义的规则标识。
+fn is_lsblk_rule(rule: &SystemRule) -> bool {
+    rule.id.eq_ignore_ascii_case("block")
+        || rule.id.to_ascii_lowercase().contains("lsblk")
+        || rule.name.to_ascii_lowercase().contains("lsblk")
+        || rule.source.pattern.to_ascii_lowercase().contains("lsblk")
+}
 pub fn json_paths(v: &Value, prefix: &str, out: &mut Vec<String>) {
     match v {
         Value::Object(o) => {
@@ -176,6 +187,9 @@ fn extract_prepared(
         fields: rule.fields.clone(),
         rows: vec![],
         storage: vec![],
+        raw_text: is_lsblk_rule(rule)
+            .then(|| text.to_owned())
+            .unwrap_or_default(),
         source: source.into(),
         warning: String::new(),
     };
@@ -436,5 +450,20 @@ mod tests {
         let t=extract(&r,r#"{"disk":{"devices":[{"name":"a","smart":{"report":[{"raw":1}]}},{"name":"b","smart":{"report":[{"raw":2}]}}]}}"#,"x").unwrap();
         assert_eq!(t.rows[1]["盘"], "b");
         assert_eq!(t.rows.len(), 2);
+    }
+    #[test]
+    fn lsblk_rule_keeps_complete_source_text() {
+        let rule = SystemRule {
+            id: "block".into(),
+            source: crate::rules::Source {
+                pattern: "cmd/lsblk.log".into(),
+                mode: "exact".into(),
+            },
+            kind: "columns".into(),
+            ..SystemRule::default()
+        };
+        let text = "NAME TYPE\npool1-md0 linear\n";
+        let table = extract(&rule, text, "cmd/lsblk.log").unwrap();
+        assert_eq!(table.raw_text, text);
     }
 }

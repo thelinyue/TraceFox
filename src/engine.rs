@@ -946,6 +946,7 @@ pub fn analyze_with_workers(
         if !report.system.iter().any(|t| t.id == s.id) {
             report.system.push(Table {
                 storage: vec![],
+                raw_text: String::new(),
                 id: s.id.clone(),
                 name: s.name.clone(),
                 group: s.group.clone(),
@@ -978,27 +979,12 @@ pub fn analyze_with_workers(
     });
     extract::join_tables(&mut report.system, &rules.system);
     // 将 lsblk 的 md RAID 类型按 poolN 回填到 sysinfo.json 的 used_for 存储池。
-    let mut raid_by_pool = std::collections::HashMap::new();
-    if let Some(block) = report.system.iter().find(|t| t.id == "block") {
-        let mut raid = None;
-        for row in &block.rows {
-            let text = row.values().cloned().collect::<Vec<_>>().join(" ");
-            if let Some(c) = regex::Regex::new(r"\braid(\d+)\b")
-                .ok()
-                .and_then(|r| r.captures(&text))
-            {
-                raid = Some(format!("RAID{}", &c[1]));
-            }
-            if let Some(c) = regex::Regex::new(r"pool(\d+)-")
-                .ok()
-                .and_then(|r| r.captures(&text))
-            {
-                if let Some(value) = &raid {
-                    raid_by_pool.insert(format!("Storage Pool {}", &c[1]), value.clone());
-                }
-            }
-        }
-    }
+    let raid_by_pool = report
+        .system
+        .iter()
+        .find(|t| t.id == "block")
+        .map(infer_raid_by_pool)
+        .unwrap_or_default();
     progress(format!(
         "扫描与结果合并完成（{:.2} 秒）",
         started.elapsed().as_secs_f64()
@@ -1175,6 +1161,29 @@ pub fn analyze_with_workers(
     ));
     progress(format!("分析完成：{}", dest.display()));
     Ok(dest)
+}
+
+/// 从 lsblk 行中提取存储池 RAID 标签；linear 在摘要中按 JBOD 展示，原始行不改写。
+fn infer_raid_by_pool(block: &Table) -> std::collections::HashMap<String, String> {
+    let raid_re = Regex::new(r"(?i)\braid(\d+)\b").expect("RAID 类型正则有效");
+    let linear_re = Regex::new(r"(?i)\blinear\b").expect("linear 类型正则有效");
+    let pool_re = Regex::new(r"pool(\d+)-").expect("存储池编号正则有效");
+    let mut raid_by_pool = std::collections::HashMap::new();
+    let mut raid = None;
+    for row in &block.rows {
+        let text = row.values().cloned().collect::<Vec<_>>().join(" ");
+        if linear_re.is_match(&text) {
+            raid = Some("JBOD".to_owned());
+        } else if let Some(c) = raid_re.captures(&text) {
+            raid = Some(format!("RAID{}", &c[1]));
+        }
+        if let Some(c) = pool_re.captures(&text) {
+            if let Some(value) = &raid {
+                raid_by_pool.insert(format!("Storage Pool {}", &c[1]), value.clone());
+            }
+        }
+    }
+    raid_by_pool
 }
 /// 流式转义内嵌 JSON，避免脚本标签注入，同时不构造完整 JSON 和 HTML 副本。
 struct HtmlJsonWriter<W>(W);
@@ -1378,5 +1387,30 @@ mod tests {
             ..r
         };
         assert!(event_time("2026-09-09 08:00:00", &r).1.is_some());
+    }
+    #[test]
+    fn linear_lsblk_is_reported_as_jbod_without_rewriting_rows() {
+        let row = |name: &str, kind: &str| {
+            let mut row = std::collections::BTreeMap::new();
+            row.insert("设备树".into(), name.into());
+            row.insert("类型".into(), kind.into());
+            row
+        };
+        let block = Table {
+            id: "block".into(),
+            name: "块设备与挂载".into(),
+            group: "补充信息".into(),
+            view: "table".into(),
+            fields: vec![],
+            rows: vec![row("pool1-md0", "linear"), row("pool2-md1", "raid1")],
+            storage: vec![],
+            raw_text: "NAME TYPE\npool1-md0 linear\n".into(),
+            source: "cmd/lsblk.log".into(),
+            warning: String::new(),
+        };
+        let raid = infer_raid_by_pool(&block);
+        assert_eq!(raid.get("Storage Pool 1"), Some(&"JBOD".to_owned()));
+        assert_eq!(raid.get("Storage Pool 2"), Some(&"RAID1".to_owned()));
+        assert_eq!(block.rows[0]["类型"], "linear");
     }
 }

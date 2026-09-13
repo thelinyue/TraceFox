@@ -152,10 +152,17 @@ with sync_playwright() as p:
     assert page.locator("#system").is_visible()
     standalone = fixture()
     standalone["system"] = standalone["system"][:2]
-    standalone["system"].append(dict(id="lsblk", name="设备树（lsblk）", source="cmd/lsblk.log", group="存储", view="table", warning="", fields=[dict(name="设备", path="name"), dict(name="类型", path="type"), dict(name="容量", path="size"), dict(name="挂载点", path="mountpoint"), dict(name="父设备", path="pkname")], rows=[{"设备":"md0", "类型":"raid1", "容量":"7.3T", "挂载点":"/volume1", "父设备":""}, {"设备":"sda", "类型":"disk", "容量":"8T", "挂载点":"", "父设备":"md0"}, {"设备":"sdb", "类型":"disk", "容量":"8T", "挂载点":"", "父设备":"md0"}]))
+    standalone["system"].append(dict(id="lsblk", name="设备树（lsblk）", source="cmd/lsblk.log", group="存储", view="table", warning="", raw_text="NAME        SIZE TYPE  RO MOUNTPOINTS\\nmd0         7.3T raid1 0  /volume1\\nsda         8T   disk  0\\nsdb         8T   disk  0\\n", fields=[dict(name="设备", path="name"), dict(name="类型", path="type"), dict(name="容量", path="size"), dict(name="挂载点", path="mountpoint"), dict(name="父设备", path="pkname")], rows=[{"设备":"md0", "类型":"raid1", "容量":"7.3T", "挂载点":"/volume1", "父设备":""}, {"设备":"sda", "类型":"disk", "容量":"8T", "挂载点":"", "父设备":"md0"}, {"设备":"sdb", "类型":"disk", "容量":"8T", "挂载点":"", "父设备":"md0"}]))
     load(write_report(folder / "standalone/report.html", standalone, template))
     page.locator("#menu-toggle").click()
     page.locator("#navigation").get_by_role("button", name="硬盘与存储池", exact=True).click()
+    raw_source = page.locator("#storage-content .raw-source")
+    assert raw_source.count() == 1
+    assert page.locator("#storage-content").locator(":scope > .raw-source").last.evaluate("node => node === node.parentElement.lastElementChild")
+    assert raw_source.get_attribute("open") is None
+    raw_source.locator("summary").click()
+    assert raw_source.locator(".raw-log").is_visible()
+    assert "NAME        SIZE TYPE" in raw_source.locator(".raw-log").inner_text()
     row = page.locator(".disk-row").first
     row.locator(".disk-row-head").click()
     assert "RAID1" in page.locator("#storage-content").inner_text()

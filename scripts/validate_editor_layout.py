@@ -21,7 +21,7 @@ for scale in [1,1.5]:
     env=os.environ.copy();env['LOCALAPPDATA']=str(profile);env['SLINT_SCALE_FACTOR']=str(scale)
     proc=subprocess.Popen([str(exe)],env=env)
     try:
-        time.sleep(2);app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);click(app,'关键词与报告规则')
+        time.sleep(2);app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);click(app,'规则管理')
         e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid);e.wait('visible',timeout=10)
         native=Desktop(backend='win32').window(handle=e.handle)
         native.move_window(x=30,y=30,width=round(800*scale),height=round(580*scale));time.sleep(.5)

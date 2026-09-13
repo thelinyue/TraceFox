@@ -58,7 +58,7 @@ def launch_editor():
     proc = subprocess.Popen([str(exe)], env=env, cwd=folder)
     app = Desktop(backend="uia").window(title="TraceFox", process=proc.pid)
     app.wait("visible", timeout=15)
-    click(app, "关键词与报告规则")
+    click(app, "规则管理")
     editor = Desktop(backend="uia").window(title="TraceFox · 规则编辑", process=proc.pid)
     editor.wait("visible", timeout=15)
     Desktop(backend="win32").window(handle=editor.handle).move_window(x=10, y=10, width=1100, height=740)

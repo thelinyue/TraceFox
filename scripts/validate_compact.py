@@ -26,7 +26,7 @@ for scale in [1,1.5]:
         for c in app.descendants(control_type='Button'):
             assert c.rectangle().height()<=40*scale,(c.window_text(),c.rectangle())
         capture(app,'main-'+label+'.png')
-        click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid);e.wait('visible',timeout=10)
+        click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid);e.wait('visible',timeout=10)
         bounds(e,['关键词','系统信息','时间线','报告样式','保存全部','取消','导入','导出 ▾']);capture(e,'editor-'+label+'.png')
         click(e,'系统信息');click(e,'套用参考配置')
         preview=Desktop(backend='uia').window(title='TraceFox · 导入预览',process=proc.pid);preview.wait('visible',timeout=10);bounds(preview);capture(preview,'import-'+label+'.png');click(preview,'取消')

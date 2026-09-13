@@ -97,7 +97,7 @@ try:
             proc = subprocess.Popen([str(executable)], env=env)
             app = Desktop(backend="uia").window(title="TraceFox", process=proc.pid)
             app.wait("visible", timeout=15)
-            click(app, "关键词与报告规则")
+            click(app, "规则管理")
             e = Desktop(backend="uia").window(title="TraceFox · 规则编辑", process=proc.pid)
             e.wait("visible", timeout=10)
             Desktop(backend="win32").window(handle=e.handle).move_window(x=20, y=20, width=900, height=640)

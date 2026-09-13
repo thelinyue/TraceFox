@@ -27,7 +27,7 @@ for scale in [1,1.5]:
   env=os.environ.copy();env['LOCALAPPDATA']=str(profile);env['SLINT_SCALE_FACTOR']=str(scale)
   proc=subprocess.Popen([str(exe)],env=env)
   try:
-   app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);app.wait('visible',timeout=20);click(app,'关键词与报告规则')
+   app=Desktop(backend='uia').window(title='TraceFox',process=proc.pid);app.wait('visible',timeout=20);click(app,'规则管理')
    e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid);e.wait('visible',timeout=10)
    Desktop(backend='win32').window(handle=e.handle).move_window(x=0,y=0,width=round(1160*scale),height=min(round(760*scale),ctypes.windll.user32.GetSystemMetrics(1)-40));time.sleep(.5)
    print('opened',scale,flush=True)
@@ -60,7 +60,7 @@ for scale in [1,1.5]:
    for n in range(1,8):mouse.move(coords=(start[0]+round((end[0]-start[0])*n/7),start[1]));time.sleep(.04)
    mouse.release(coords=end);time.sleep(.3);click(e,'保存全部');width=json.loads(config.read_text(encoding='utf-8'))['layout']['file_panel_width'];assert 300<=width<=315,width
    e.capture_as_image().save(str(out/f'catalog-{scale}.png'))
-   click(e,'取消');click(app,'关键词与报告规则');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
+   click(e,'取消');click(app,'规则管理');e=Desktop(backend='uia').window(title='TraceFox · 规则编辑',process=proc.pid)
    Desktop(backend='win32').window(handle=e.handle).move_window(x=0,y=0,width=round(1160*scale),height=min(round(760*scale),ctypes.windll.user32.GetSystemMetrics(1)-40));time.sleep(.3)
    click(e,'保存全部');assert json.loads(config.read_text(encoding='utf-8'))['layout']['file_panel_width']==width
    Desktop(backend='win32').window(handle=e.handle).move_window(x=0,y=0,width=round(800*scale),height=round(580*scale));time.sleep(.3)

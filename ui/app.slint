@@ -73,7 +73,7 @@ export component AppWindow inherits Window {
         }
         HorizontalBox {padding:0;spacing:6px;alignment:start;vertical-stretch:0;height:32px;
             Button {enabled:!root.settings-open;text:"导入诊断包";primary:true;clicked=>{root.import-package();}}
-            Button {enabled:!root.settings-open;text:"关键词与报告规则";clicked=>{root.edit-rules();}}
+            Button {enabled:!root.settings-open;text:"规则管理";clicked=>{root.edit-rules();}}
         }
         Rectangle {vertical-stretch:1;min-height:140px;background:#f1f4f8;border-radius:8px;
             VerticalBox {padding:8px;spacing:6px;
